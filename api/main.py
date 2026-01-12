@@ -185,7 +185,7 @@ def _can_user_broadcast(db, session_id: str, sender_name: str) -> bool:
     return bool(g and g.can_broadcast)
 
 @app.post("/broadcasts")
-def create_broadcast(body: BroadcastCreate):
+async def create_broadcast(body: BroadcastCreate):
     with SessionLocal() as db:
         s = db.get(DbSession, body.session_id)
         if not s:
@@ -204,6 +204,7 @@ def create_broadcast(body: BroadcastCreate):
         db.add(b)
         db.commit()
         db.refresh(b)
+
         event = {
             "type": "BROADCAST",
             "data": {
@@ -214,11 +215,12 @@ def create_broadcast(body: BroadcastCreate):
                 "type": b.type,
                 "payload": b.payload,
                 "created_at": str(b.created_at),
-            }
+            },
         }
-        # 저장과 동시에 실시간 전파
-        import asyncio
-        asyncio.create_task(hub.broadcast(b.session_id, event))
+
+        # ✅ 여기서 그냥 await로 전파 (MVP에 충분히 빠름)
+        await hub.broadcast(b.session_id, event)
+
         return {"id": b.id, "created_at": str(b.created_at)}
 
 @app.get("/sessions/{session_id}/broadcasts")
