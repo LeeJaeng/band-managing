@@ -10,10 +10,14 @@ from typing import Optional
 from sqlalchemy import delete
 from api.models import Session as DbSession, Grant as DbGrant, Broadcast as DbBroadcast, BroadcastPreset as DbPreset
 
+from api.ws_hub import Hub
+
 # create tables (MVP)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+hub = Hub()
 
 @app.get("/health")
 def health():
@@ -62,36 +66,28 @@ def join_team(code: str, body: JoinRequest):
         db.commit()
         return {"team_id": inv.team_id, "member": {"name": member.name, "part": member.part}}
 
-from api.ws_hub import Hub
-hub = Hub()
+import json
 
 @app.websocket("/ws")
 async def ws(ws: WebSocket):
     await ws.accept()
-    session_id = None
+    joined_session_id = None
     try:
         while True:
             raw = await ws.receive_text()
-            msg = __import__("json").loads(raw)
-
+            msg = json.loads(raw)
             t = msg.get("type")
 
             if t == "JOIN_SESSION":
-                session_id = msg["session_id"]
-                await hub.join(session_id, ws)
-                await ws.send_text('{"type":"JOINED"}')
-
-            elif t == "SEND_BROADCAST":
-                # payload contains {session_id, data:{...}}
-                sid = msg["session_id"]
-                await hub.broadcast(sid, {"type":"BROADCAST", "data": msg.get("data", {})})
+                joined_session_id = msg["session_id"]
+                await hub.join(joined_session_id, ws)
+                await ws.send_text(json.dumps({"type": "JOINED"}))
 
             else:
-                await ws.send_text('{"type":"ERROR","message":"unknown type"}')
-
+                await ws.send_text(json.dumps({"type": "ERROR", "message": "unknown type"}))
     except WebSocketDisconnect:
-        if session_id:
-            await hub.leave(session_id, ws)
+        if joined_session_id:
+            await hub.leave(joined_session_id, ws)
 
 class SessionCreate(BaseModel):
     team_id: str
@@ -208,6 +204,21 @@ def create_broadcast(body: BroadcastCreate):
         db.add(b)
         db.commit()
         db.refresh(b)
+        event = {
+            "type": "BROADCAST",
+            "data": {
+                "id": b.id,
+                "session_id": b.session_id,
+                "sender_name": b.sender_name,
+                "target": b.target,
+                "type": b.type,
+                "payload": b.payload,
+                "created_at": str(b.created_at),
+            }
+        }
+        # 저장과 동시에 실시간 전파
+        import asyncio
+        asyncio.create_task(hub.broadcast(b.session_id, event))
         return {"id": b.id, "created_at": str(b.created_at)}
 
 @app.get("/sessions/{session_id}/broadcasts")

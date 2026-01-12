@@ -18,8 +18,8 @@ class Hub:
     async def broadcast(self, session_id: str, payload: dict):
         if session_id not in self.rooms:
             return
-        dead = []
         msg = json.dumps(payload, ensure_ascii=False)
+        dead = []
         for w in list(self.rooms[session_id]):
             try:
                 await w.send_text(msg)
