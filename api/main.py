@@ -239,3 +239,11 @@ def list_broadcasts(session_id: str, limit: int = 50):
             "payload": r.payload,
             "created_at": str(r.created_at),
         } for r in rows]
+
+@app.get("/sessions/{session_id}")
+def get_session(session_id: str):
+    with SessionLocal() as db:
+        s = db.get(DbSession, session_id)
+        if not s:
+            raise HTTPException(404, "session not found")
+        return {"id": s.id, "team_id": s.team_id, "title": s.title, "status": s.status}

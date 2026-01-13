@@ -1,0 +1,23 @@
+/* Design tokens */
+:root {
+  --bg: #0b0f14;
+  --panel: #0f1620;
+  --card: #121b26;
+  --text: #e8eef6;
+  --muted: rgba(232, 238, 246, 0.65);
+  --line: rgba(232, 238, 246, 0.12);
+
+  --brand: #7c5cff;
+  --brand-2: #19c37d;
+
+  --danger: #ff4d4f;
+
+  --radius: 14px;
+  --radius-lg: 18px;
+
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+
+$bp-sm: 480px;
+$bp-md: 768px;
+$bp-lg: 1024px;

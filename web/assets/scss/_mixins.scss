@@ -1,0 +1,47 @@
+@mixin card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+@mixin panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+@mixin btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: transform .05s ease, background .15s ease, border-color .15s ease;
+
+  &:hover { background: rgba(255,255,255,0.05); border-color: rgba(232,238,246,0.22); }
+  &:active { transform: translateY(1px); }
+  &:disabled { opacity: .5; cursor: not-allowed; }
+}
+
+@mixin input {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  outline: none;
+
+  &::placeholder { color: rgba(232,238,246,0.38); }
+  &:focus { border-color: rgba(124,92,255,0.7); box-shadow: 0 0 0 4px rgba(124,92,255,0.15); }
+}
