@@ -1,41 +1,60 @@
-// web/composables/useWs.ts
-import { ref, onUnmounted } from 'vue'
+import { onUnmounted, ref } from "vue";
 
-export function useWs(sessionId: string) {
-  const events = ref<any[]>([])
-  const connected = ref(false)
-  const lastMessageAt = ref<number | null>(null)
+export type WsUser = {
+  id: string;
+  name: string;
+  part?: string | null;
+};
 
-  if (!sessionId) {
-    return { events, connected, lastMessageAt }
+export function useWs(sessionId: string, user: WsUser) {
+  const events = ref<any[]>([]);
+  const connected = ref(false);
+  const lastMessageAt = ref<number | null>(null);
+
+  if (!sessionId || !user?.id || !user?.name) {
+    return { events, connected, lastMessageAt };
   }
 
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${protocol}://${location.host}/ws`)
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  const wsUrl = `${protocol}://${location.host}/ws`;
+  const ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    connected.value = true
-    ws.send(JSON.stringify({
-      type: 'JOIN_SESSION',
-      session_id: sessionId
-    }))
-  }
+    connected.value = true;
+    ws.send(
+      JSON.stringify({
+        type: "JOIN_SESSION",
+        session_id: sessionId,
+        user: {
+          id: user.id,
+          name: user.name,
+          part: user.part ?? null,
+        },
+      })
+    );
+  };
 
   ws.onmessage = (e) => {
+    lastMessageAt.value = Date.now();
     try {
-      const data = JSON.parse(e.data)
-      events.value.unshift(data)
-      lastMessageAt.value = Date.now()
+      const msg = JSON.parse(e.data);
+      events.value = [msg, ...events.value].slice(0, 50);
     } catch {}
-  }
+  };
+
+  ws.onerror = () => {
+    connected.value = false;
+  };
 
   ws.onclose = () => {
-    connected.value = false
-  }
+    connected.value = false;
+  };
 
   onUnmounted(() => {
-    ws.close()
-  })
+    try {
+      ws.close();
+    } catch {}
+  });
 
-  return { events, connected, lastMessageAt }
+  return { events, connected, lastMessageAt };
 }

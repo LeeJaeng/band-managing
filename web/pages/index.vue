@@ -2,124 +2,74 @@
   import { computed, ref } from "vue";
   
   const sessionId = ref("");
-  const role = ref<"member" | "leader">("member");
-  const creating = ref(false);
-  const err = ref<string | null>(null);
-  const created = ref<string | null>(null);
+  const name = ref("");
+  const part = ref("");
   
-  const raw = computed(() => sessionId.value.trim());
-  const canEnter = computed(() => raw.value.length > 0);
+  const parts = ["Vocal", "Keys", "Guitar", "Bass", "Drums"];
   
-  const enterTo = computed(() =>
-    canEnter.value ? `/session/${encodeURIComponent(raw.value)}?role=${role.value}` : "#"
-  );
+  const canEnter = computed(() => sessionId.value.trim() && name.value.trim());
   
-  async function createSessionCode() {
-    creating.value = true;
-    err.value = null;
-    created.value = null;
+  async function enter() {
+    const sid = sessionId.value.trim();
   
-    try {
-      // 1) 팀 생성
-      const team = await $fetch<{ id: string }>("/api/teams", {
-        method: "POST",
-        body: { name: "UI Test Team" },
-      });
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_name: name.value,
+        part: part.value || null,
+      }),
+    });
   
-      // 2) 세션 생성
-      const session = await $fetch<{ id: string }>("/api/sessions", {
-        method: "POST",
-        body: { team_id: team.id, title: "UI Test Session" },
-      });
-  
-      // 3) Leader 권한 부여
-      await $fetch("/api/grants", {
-        method: "POST",
-        body: { session_id: session.id, user_name: "Leader", can_broadcast: true },
-      });
-  
-      sessionId.value = session.id;
-      created.value = session.id;
-  
-      // 4) 자동으로 리더로 입장
-      await navigateTo(`/session/${encodeURIComponent(session.id)}?role=leader`);
-    } catch (e: any) {
-      err.value = e?.message ?? String(e);
-    } finally {
-      creating.value = false;
+    if (!res.ok) {
+      alert("세션 입장 실패");
+      return;
     }
-  }
   
-  async function copyCode() {
-    if (!created.value) return;
-    await navigator.clipboard.writeText(created.value);
+    const data = await res.json();
+    const p = data.participant;
+  
+    await navigateTo({
+      path: `/session/${encodeURIComponent(sid)}`,
+      query: {
+        pid: p.id,
+        name: p.user_name,
+        part: p.part || "",
+        role: p.role, // LEADER/MEMBER
+      },
+    });
   }
   </script>
   
   <template>
     <main class="container">
       <h1 class="h1">Band Managing</h1>
-      <p class="sub">세션 ID로 입장하거나, 버튼으로 테스트 세션코드를 생성할 수 있습니다.</p>
+      <p class="sub">세션에 참여하세요</p>
   
       <div class="space"></div>
   
       <section class="card">
         <div class="label">Session ID</div>
-        <input
-          class="input"
-          v-model="sessionId"
-          placeholder="예: 40be22c7-..."
-          autocapitalize="off"
-          autocomplete="off"
-          spellcheck="false"
-        />
+        <input class="input" v-model="sessionId" placeholder="세션 ID" />
   
         <div class="space"></div>
   
-        <div class="label">Mode</div>
-        <div class="row">
-          <button class="btn" :class="{ 'btn-primary': role === 'member' }" @click="role = 'member'">
-            Team Member
-          </button>
-          <button class="btn" :class="{ 'btn-primary': role === 'leader' }" @click="role = 'leader'">
-            Leader
-          </button>
-  
-          <button class="btn-ghost" :disabled="creating" @click="createSessionCode">
-            {{ creating ? "세션 생성 중..." : "세션코드 생성(테스트)" }}
-          </button>
-  
-          <button class="btn" v-if="created" @click="copyCode">코드 복사</button>
-        </div>
-  
-        <div class="hr"></div>
-  
-        <NuxtLink
-          class="btn-primary"
-          :to="enterTo"
-          :style="canEnter ? '' : 'opacity:.55;pointer-events:none;'"
-        >
-          Enter
-        </NuxtLink>
+        <div class="label">이름</div>
+        <input class="input" v-model="name" placeholder="이름" />
   
         <div class="space"></div>
   
-        <p v-if="err" class="small" style="color: var(--danger); font-weight: 800">에러: {{ err }}</p>
+        <div class="label">파트</div>
+        <select class="input" v-model="part">
+          <option value="">선택 안 함</option>
+          <option v-for="p in parts" :key="p" :value="p">{{ p }}</option>
+        </select>
   
-        <p v-if="created" class="small">
-          생성됨:
-          <span class="mono">{{ created }}</span>
-        </p>
-      </section>
+        <div class="space"></div>
   
-      <div class="space"></div>
-  
-      <section class="panel">
-        <div class="label">팁</div>
-        <div class="small">
-          새 창(또는 시크릿)에서 같은 세션 ID로 <span class="kbd">Member</span>로 입장한 뒤,
-          <span class="kbd">Leader</span>에서 버튼을 눌러 브로드캐스트가 뜨는지 확인하세요.
-        </div>
+        <button class="btn-primary" :disabled="!canEnter" @click="enter">
+          세션 입장
+        </button>
       </section>
     </main>
   </template>
