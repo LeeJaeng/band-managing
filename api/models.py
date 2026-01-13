@@ -1,10 +1,9 @@
 # api/models.py
-from sqlalchemy.orm import declarative_base
+from api.db import Base   # ✅ 이 Base를 사용해야 합니다.
+
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Boolean, JSON
 from sqlalchemy.sql import func
 import uuid
-
-Base = declarative_base()
 
 
 def _uuid():
