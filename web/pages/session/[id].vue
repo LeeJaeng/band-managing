@@ -1,7 +1,14 @@
 <script setup lang="ts">
-  import { computed, ref, watchEffect } from "vue";
+  import { computed, onMounted, ref, watchEffect } from "vue";
   import { useRoute } from "vue-router";
   import { useWs } from "~/composables/useWs";
+  import {
+    clearActiveSession,
+    loadActiveSession,
+    saveActiveSession,
+    getOverlaySeconds,
+    setOverlaySeconds,
+  } from "~/composables/useSessionState";
   
   const route = useRoute();
   
@@ -18,8 +25,27 @@
   
   const participants = ref<any[]>([]);
   const permMap = ref<Record<string, boolean>>({}); // participant_id -> can_broadcast
+
+    // -------- Presets (Step4) --------
+  const presets = ref<any[]>([]);
+  const presetsLoading = ref(false);
+  const presetErr = ref<string | null>(null);
+
+  const newPresetTitle = ref("");
+  const newPresetText = ref("");
+
+  // 수정 모드
+  const editingPresetId = ref<string | null>(null);
+  const editTitle = ref("");
+  const editText = ref("");
   
-  // 세션 존재 검증
+  // 오버레이 시간(초) - 개인 설정
+  const overlaySeconds = ref<number>(4);
+  onMounted(() => {
+    if (process.client) overlaySeconds.value = getOverlaySeconds();
+  });
+  
+  // ✅ 세션 존재 검증
   watchEffect(async () => {
     if (!sid.value) return;
   
@@ -37,9 +63,10 @@
     }
   });
   
-  // 참가자 목록 + 권한 맵 로드
+  // ✅ 참가자/권한 로드
   async function refreshMembers() {
     if (!sid.value) return;
+  
     const list = await $fetch<any[]>(`/api/sessions/${encodeURIComponent(sid.value)}/participants`);
     participants.value = list;
   
@@ -48,13 +75,56 @@
     for (const p of perms) m[p.participant_id] = !!p.can_broadcast;
     permMap.value = m;
   }
+  async function refreshPresets() {
+    if (!sessionInfo.value?.team_id) return;
+
+    presetsLoading.value = true;
+    presetErr.value = null;
+
+    try {
+      const list = await $fetch<any[]>(`/api/teams/${encodeURIComponent(sessionInfo.value.team_id)}/presets`);
+      presets.value = Array.isArray(list) ? list : [];
+    } catch (e: any) {
+      presetErr.value = e?.message ?? String(e);
+    } finally {
+      presetsLoading.value = false;
+    }
+  }
   
   watchEffect(async () => {
     if (valid.value !== "ok") return;
     await refreshMembers();
+    await refreshPresets();
   });
   
-  // WS (세션 ok + client + 내 pid/name 준비)
+  // ✅ 세션 유지: (1) query가 없으면 localStorage에서 복구 (2) 정상 진입이면 저장
+  onMounted(() => {
+    if (!process.client) return;
+  
+    // query 없이 직접 들어온 케이스(새로고침/홈 복귀/주소 입력 등)
+    if (!pid.value || !myName.value) {
+      const s = loadActiveSession();
+      if (s?.sid === sid.value && s.pid && s.name) {
+        navigateTo({
+          path: `/session/${encodeURIComponent(sid.value)}`,
+          query: { pid: s.pid, name: s.name, part: s.part || "", role: s.role || "MEMBER" },
+        });
+      }
+      return;
+    }
+  
+    // 정상 진입이면 저장
+    saveActiveSession({
+      sid: sid.value,
+      pid: pid.value,
+      name: myName.value,
+      part: myPart.value || "",
+      role: myRole.value,
+      joinedAt: Date.now(),
+    });
+  });
+  
+  // WS 연결
   const wsState = computed(() => {
     if (process.server) return null;
     if (valid.value !== "ok") return null;
@@ -71,38 +141,131 @@
   const lastMessageAt = computed(() => wsState.value?.lastMessageAt.value ?? null);
   const events = computed(() => wsState.value?.events.value ?? []);
   
+  // join 이벤트 오면 목록 갱신
+  watchEffect(() => {
+    const joined = events.value.find((e: any) => e?.type === "USER_JOINED");
+    if (joined) setTimeout(() => refreshMembers(), 200);
+  });
+  
+  // 권한 변경 실시간 반영(서버가 PERMISSION_UPDATED를 뿌리는 경우)
+  watchEffect(() => {
+    const permEvt = events.value.find((e: any) => e?.type === "PERMISSION_UPDATED") as any;
+    if (!permEvt?.data) return;
+    const { participant_id, can_broadcast } = permEvt.data;
+    permMap.value = { ...permMap.value, [participant_id]: !!can_broadcast };
+  });
+  
+  const isLeader = computed(() => myRole.value === "LEADER");
+  const canBroadcast = computed(() => isLeader.value || !!permMap.value[pid.value]);
+  
+  // 브로드캐스트 오버레이(중앙, 반투명)
   const latestBroadcast = computed(() => events.value.find((e: any) => e?.type === "BROADCAST") as any);
   const overlayText = computed(() => latestBroadcast.value?.data?.payload?.text || "");
   const overlaySender = computed(() => latestBroadcast.value?.data?.sender || null);
-  const overlayOpen = ref(true);
+  
+  const overlayVisible = ref(false);
+  let overlayTimer: any = null;
   
   watchEffect(() => {
-    if (overlayText.value) overlayOpen.value = true;
+    if (!overlayText.value) return;
+    overlayVisible.value = true;
+    if (overlayTimer) clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(() => (overlayVisible.value = false), overlaySeconds.value * 1000);
   });
   
-  // WS에서 누군가 join 했으면 멤버 목록 갱신
-  watchEffect(() => {
-    const joined = events.value.find((e: any) => e?.type === "USER_JOINED");
-    if (joined) {
-      // 너무 자주 갱신하지 않게 한 틱 뒤 갱신
-      setTimeout(() => refreshMembers(), 200);
-    }
-  });
+  function updateOverlaySeconds(n: number) {
+    overlaySeconds.value = Math.max(1, Math.min(20, Math.floor(n || 4)));
+    if (process.client) setOverlaySeconds(overlaySeconds.value);
+  }
   
-  // LEADER 권한 토글
-  const isLeader = computed(() => myRole.value === "LEADER");
+  // ✅ 공유 링크 복사 (요구사항 6)
+  async function copyShareLink() {
+    const url = `${location.origin}/join?sid=${encodeURIComponent(sid.value)}`;
+    await navigator.clipboard.writeText(url);
+    // 가벼운 피드백: 오버레이를 잠깐 띄움
+    overlayVisible.value = true;
+    if (overlayTimer) clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(() => (overlayVisible.value = false), 1200);
+  }
   
+  // ✅ 나가기 (요구사항 1)
+  async function leaveSession() {
+    if (process.client) clearActiveSession();
+    await navigateTo("/");
+  }
+  
+  // 리더 권한 토글
   async function togglePermission(targetPid: string) {
+      if (!isLeader.value) return;
+      const current = !!permMap.value[targetPid];
+      const next = !current;
+    
+      await $fetch(`/api/sessions/${encodeURIComponent(sid.value)}/broadcast-permissions`, {
+        method: "POST",
+        body: { participant_id: targetPid, can_broadcast: next },
+      });
+    
+      // 내 화면 즉시 반영
+      permMap.value = { ...permMap.value, [targetPid]: next };
+    }
+    function startEdit(p: any) {
+    editingPresetId.value = p.id;
+    editTitle.value = String(p.title || "");
+    editText.value = String(p?.payload?.text ?? "");
+  }
+
+  function cancelEdit() {
+    editingPresetId.value = null;
+    editTitle.value = "";
+    editText.value = "";
+  }
+
+  async function createPreset() {
     if (!isLeader.value) return;
-    const current = !!permMap.value[targetPid];
-    const next = !current;
-  
-    await $fetch(`/api/sessions/${encodeURIComponent(sid.value)}/broadcast-permissions`, {
+    if (!sessionInfo.value?.team_id) return;
+
+    const title = newPresetTitle.value.trim();
+    const text = newPresetText.value.trim();
+
+    if (!title) return;
+
+    await $fetch(`/api/teams/${encodeURIComponent(sessionInfo.value.team_id)}/presets`, {
       method: "POST",
-      body: { participant_id: targetPid, can_broadcast: next },
+      body: { team_id: sessionInfo.value.team_id, title, text: text || null },
     });
-  
-    permMap.value = { ...permMap.value, [targetPid]: next };
+
+    newPresetTitle.value = "";
+    newPresetText.value = "";
+    await refreshPresets();
+  }
+
+  async function updatePreset() {
+    if (!isLeader.value) return;
+    if (!editingPresetId.value) return;
+
+    const title = editTitle.value.trim();
+    const text = editText.value.trim();
+
+    if (!title) return;
+
+    await $fetch(`/api/presets/${encodeURIComponent(editingPresetId.value)}`, {
+      method: "PUT",
+      body: { title, text }, // text가 ""면 서버에서 payload.text 제거하도록 되어있으면 “title 전송”이 됨
+    });
+
+    cancelEdit();
+    await refreshPresets();
+  }
+
+  async function deletePreset(id: string) {
+    if (!isLeader.value) return;
+
+    await $fetch(`/api/presets/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+
+    if (editingPresetId.value === id) cancelEdit();
+    await refreshPresets();
   }
   
   async function send(text: string) {
@@ -110,12 +273,22 @@
       method: "POST",
       body: {
         session_id: sid.value,
-        sender_id: pid.value, // Step2
+        sender_id: pid.value,
         target: { all: true },
         type: "TEXT",
-        payload: { text },
+        payload: { text: text || " " },
       },
     });
+  }
+  async function sendPreset(p: any) {
+    const title = String(p?.title || "").trim();
+    const text = String(p?.payload?.text ?? "").trim();
+
+    // ✅ 규칙: text가 비어있으면 title 그대로 전송
+    const toSend = text.length > 0 ? text : title;
+
+    if (!toSend) return;
+    await send(toSend);
   }
   </script>
   
@@ -144,17 +317,24 @@
       </section>
   
       <template v-else>
-        <!-- Header -->
         <section class="card">
           <div class="row" style="justify-content: space-between; align-items: center">
             <div>
               <div class="label">Session</div>
               <div class="mono small">{{ sid }}</div>
+  
               <div class="space"></div>
+  
               <div v-if="sessionInfo?.title" style="font-weight: 900">{{ sessionInfo.title }}</div>
+  
               <div class="small" style="margin-top: 6px">
-                Me: <b>{{ myName }}</b> <span v-if="myPart">({{ myPart }})</span>
+                Me:
+                <b>{{ myName }}</b>
+                <span v-if="myPart">({{ myPart }})</span>
                 <span class="badge" style="margin-left: 8px">{{ myRole }}</span>
+                <span class="badge" :class="canBroadcast ? 'badge-ok' : ''" style="margin-left: 8px">
+                  can_broadcast: {{ canBroadcast ? "ON" : "OFF" }}
+                </span>
               </div>
             </div>
   
@@ -165,40 +345,81 @@
               <span v-if="lastMessageAt" class="small">
                 &nbsp;· last: {{ new Date(lastMessageAt).toLocaleTimeString() }}
               </span>
+  
+              <div class="space"></div>
+  
+              <div class="row" style="justify-content:flex-end;">
+                <button class="btn" @click="copyShareLink">공유 링크 복사</button>
+                <button class="btn-danger" @click="leaveSession">나가기</button>
+              </div>
             </div>
           </div>
   
           <div class="hr"></div>
   
-          <div class="panel" style="height: 46vh; display:flex; align-items:center; justify-content:center;">
+          <div class="panel">
+            <div class="label">브로드캐스트 표시 시간</div>
+            <div class="row" style="align-items:center;">
+              <input
+                class="input"
+                style="max-width: 120px;"
+                type="number"
+                :value="overlaySeconds"
+                min="1"
+                max="20"
+                @input="updateOverlaySeconds(Number(($event.target as HTMLInputElement).value || 4))"
+              />
+              <span class="small">초 (1~20)</span>
+            </div>
+          </div>
+  
+          <div class="space"></div>
+  
+          <div class="panel" style="height: 44vh; display:flex; align-items:center; justify-content:center;">
             <span class="small">Score Viewer (coming soon)</span>
           </div>
   
-          <div v-if="isLeader" class="space"></div>
+          <div v-if="canBroadcast" class="space"></div>
   
-          <!-- Leader Panel -->
-          <div v-if="isLeader" class="panel">
-            <div class="label">Leader Panel</div>
-            <div class="row">
+          <div v-if="canBroadcast" class="panel">
+            <div class="label">송신 패널</div>
+
+            <div class="row" v-if="presets.length > 0">
+              <button
+                v-for="p in presets"
+                :key="p.id"
+                class="btn"
+                @click="sendPreset(p)"
+              >
+                {{ p.title }}
+              </button>
+            </div>
+
+            <div class="row" v-else>
               <button class="btn" @click="send('벌스로 갑니다')">Verse</button>
               <button class="btn" @click="send('코러스로 갑니다')">Chorus</button>
               <button class="btn" @click="send('엔딩 컷!')">Cut</button>
               <button class="btn" @click="send('찬양 변경!')">Change</button>
             </div>
-            <p class="small" style="margin-top: 10px">
-              멤버 권한을 토글해서 “임시 방송권한”을 부여할 수 있습니다.
-            </p>
+
+            <div class="small" style="margin-top: 8px;">
+              프리셋이 있으면 프리셋 버튼이 표시됩니다.
+            </div>
           </div>
-        </section>
   
-        <div class="space"></div>
+          <div v-if="isLeader" class="space"></div>
   
-        <!-- Participants -->
-        <section class="card">
-          <div class="label">Participants</div>
-          <div class="panel">
-            <div v-if="participants.length === 0" class="small">참여자가 없습니다.</div>
-            <div v-for="p in participants" :key="p.id" class="row" style="justify-content: space-between; align-items:center; padding: 8px 0;">
+          <div v-if="isLeader" class="panel">
+            <div class="label">권한 관리</div>
+            <div class="small">멤버의 방송 권한을 ON/OFF 할 수 있습니다.</div>
+            <div class="hr"></div>
+  
+            <div
+              v-for="p in participants"
+              :key="p.id"
+              class="row"
+              style="justify-content: space-between; align-items:center; padding: 6px 0;"
+            >
               <div>
                 <b>{{ p.user_name }}</b>
                 <span class="small" v-if="p.part">({{ p.part }})</span>
@@ -208,56 +429,114 @@
   
               <div class="row" style="gap:8px; align-items:center;">
                 <span class="badge" :class="permMap[p.id] ? 'badge-ok' : ''">
-                  can_broadcast: {{ permMap[p.id] ? "ON" : "OFF" }}
+                  {{ permMap[p.id] ? "ON" : "OFF" }}
                 </span>
   
-                <button
-                  v-if="isLeader && p.role !== 'LEADER'"
-                  class="btn"
-                  @click="togglePermission(p.id)"
-                >
+                <button v-if="p.role !== 'LEADER'" class="btn" @click="togglePermission(p.id)">
                   {{ permMap[p.id] ? "권한 OFF" : "권한 ON" }}
                 </button>
               </div>
             </div>
           </div>
+          <div v-if="isLeader" class="panel" style="margin-top: 12px;">
+            <div class="label">프리셋 관리 (리더 전용)</div>
+
+            <p v-if="presetErr" class="small" style="color: var(--danger); font-weight: 800;">
+              {{ presetErr }}
+            </p>
+
+            <div class="hr"></div>
+
+            <!-- Create -->
+            <div class="label">새 프리셋 추가</div>
+            <div class="row">
+              <input class="input" style="flex:1; min-width: 180px;" v-model="newPresetTitle" placeholder="버튼명(title)" />
+              <input class="input" style="flex:2; min-width: 240px;" v-model="newPresetText" placeholder="전송 내용(text, 비우면 title 전송)" />
+              <button class="btn-primary" :disabled="presetsLoading" @click="createPreset">추가</button>
+            </div>
+
+            <div class="hr"></div>
+
+            <!-- List -->
+            <div class="label">프리셋 목록</div>
+
+            <div v-if="presets.length === 0" class="small">
+              아직 프리셋이 없습니다. 위에서 추가하세요.
+            </div>
+
+            <div v-for="p in presets" :key="p.id" class="panel" style="margin-top: 10px;">
+              <div class="row" style="justify-content: space-between; align-items: center;">
+                <div>
+                  <b>{{ p.title }}</b>
+                  <div class="small" style="margin-top: 4px;">
+                    text: <span class="mono">{{ p?.payload?.text ?? "(없음 → title 전송)" }}</span>
+                  </div>
+                </div>
+
+                <div class="row">
+                  <button class="btn" @click="startEdit(p)">수정</button>
+                  <button class="btn-danger" @click="deletePreset(p.id)">삭제</button>
+                </div>
+              </div>
+
+              <!-- Edit -->
+              <div v-if="editingPresetId === p.id" class="hr"></div>
+              <div v-if="editingPresetId === p.id">
+                <div class="label">수정</div>
+                <div class="row">
+                  <input class="input" style="flex:1; min-width: 180px;" v-model="editTitle" placeholder="버튼명(title)" />
+                  <input class="input" style="flex:2; min-width: 240px;" v-model="editText" placeholder="전송 내용(text, 비우면 title 전송)" />
+                  <button class="btn-primary" @click="updatePreset">저장</button>
+                  <button class="btn" @click="cancelEdit">취소</button>
+                </div>
+                <p class="small" style="margin-top: 6px;">
+                  text를 빈 값으로 저장하면 “title 전송” 규칙이 적용됩니다.
+                </p>
+              </div>
+            </div>
+          </div>
+
         </section>
   
         <div class="space"></div>
   
-        <!-- Events -->
         <section class="card">
           <div class="label">Recent events</div>
-          <pre class="panel mono" style="max-height: 220px; overflow:auto;">
-  {{ events.slice(0, 8) }}
-          </pre>
+          <pre class="panel mono" style="max-height: 220px; overflow:auto;">{{ events.slice(0, 8) }}</pre>
         </section>
   
-        <!-- Broadcast Overlay -->
+        <!-- 중앙 반투명 오버레이 -->
         <div
-          v-if="overlayText && overlayOpen"
-          style="position: fixed; inset: 0; z-index: 9999; display:flex; align-items:center; justify-content:center; padding: 16px; background: rgba(0,0,0,.72);"
+          v-if="overlayVisible && overlayText"
+          style="
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            pointer-events: none;
+          "
         >
-          <div class="card" style="max-width: 720px; width: 100%;">
-            <div class="small">
+          <div
+            style="
+              width: min(720px, calc(100vw - 24px));
+              border-radius: 18px;
+              border: 1px solid rgba(232,238,246,0.18);
+              background: rgba(18, 27, 38, 0.22);
+              box-shadow: 0 6px 18px rgba(0,0,0,.18);
+              padding: 18px 18px;
+            "
+          >
+            <div style="font-size: 13px; opacity: .85;">
               From:
               <b>{{ overlaySender?.name || "Unknown" }}</b>
-              <span class="small" v-if="overlaySender?.part">({{ overlaySender.part }})</span>
-              <span class="badge" style="margin-left: 8px" v-if="overlaySender?.role">
-                {{ overlaySender.role }}
-              </span>
+              <span v-if="overlaySender?.part" style="opacity:.85;">({{ overlaySender.part }})</span>
             </div>
   
-            <div class="space"></div>
-  
-            <div style="font-size: 28px; font-weight: 900; letter-spacing: -0.3px; word-break: break-word;">
+            <div style="margin-top: 10px; font-size: 34px; font-weight: 900; letter-spacing: -0.4px; line-height: 1.15;">
               {{ overlayText }}
-            </div>
-  
-            <div class="space"></div>
-  
-            <div class="row" style="justify-content:flex-end;">
-              <button class="btn-primary" @click="overlayOpen = false">확인</button>
             </div>
           </div>
         </div>

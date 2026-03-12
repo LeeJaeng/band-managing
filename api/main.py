@@ -6,11 +6,10 @@ import json
 
 from sqlalchemy import select
 from api.db import SessionLocal, engine, Base
+from api.ws_hub import Hub
 
 from api.models import (
-    Team,
-    Invite,
-    TeamMember,
+    Team, Invite, TeamMember,
     Session as DbSession,
     SessionParticipant,
     Grant as DbGrant,
@@ -18,33 +17,18 @@ from api.models import (
     BroadcastPreset as DbPreset,
 )
 
-from api.ws_hub import Hub
-
-# create tables (MVP)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 hub = Hub()
 
-
 @app.get("/health")
 def health():
     return {"ok": True, "service": "band-managing-api"}
 
-
-# ---------- Team / Invite ----------
+# ---------- Team ----------
 class TeamCreate(BaseModel):
     name: str
-
-
-class InviteCreate(BaseModel):
-    max_use: int = 10
-
-
-class JoinRequest(BaseModel):
-    user_name: str
-    part: str | None = None
-
 
 @app.post("/teams")
 def create_team(body: TeamCreate):
@@ -54,33 +38,6 @@ def create_team(body: TeamCreate):
         db.commit()
         db.refresh(team)
         return {"id": team.id, "name": team.name}
-
-
-@app.post("/teams/{team_id}/invites")
-def create_invite(team_id: str, body: InviteCreate):
-    with SessionLocal() as db:
-        team = db.get(Team, team_id)
-        if not team:
-            raise HTTPException(404, "team not found")
-        code = uuid.uuid4().hex[:6]
-        inv = Invite(code=code, team_id=team_id, remain=body.max_use)
-        db.add(inv)
-        db.commit()
-        return {"code": code}
-
-
-@app.post("/invites/{code}/join")
-def join_team(code: str, body: JoinRequest):
-    with SessionLocal() as db:
-        inv = db.get(Invite, code)
-        if not inv or inv.remain <= 0:
-            raise HTTPException(400, "invalid invite")
-        inv.remain -= 1
-        member = TeamMember(team_id=inv.team_id, name=body.user_name, part=body.part)
-        db.add(member)
-        db.commit()
-        return {"team_id": inv.team_id, "member": {"name": member.name, "part": member.part}}
-
 
 # ---------- WS ----------
 @app.websocket("/ws")
@@ -100,7 +57,6 @@ async def ws(ws: WebSocket):
                 await hub.join(joined_session_id, ws)
                 await ws.send_text(json.dumps({"type": "JOINED"}))
 
-                # announce join to room
                 if user:
                     await hub.broadcast(joined_session_id, {"type": "USER_JOINED", "data": user})
 
@@ -110,17 +66,11 @@ async def ws(ws: WebSocket):
         if joined_session_id:
             await hub.leave(joined_session_id, ws)
 
-
 # ---------- Session ----------
 class SessionCreate(BaseModel):
     team_id: str
     title: str
-
-
-class JoinSessionBody(BaseModel):
-    user_name: str
-    part: str | None = None
-
+    parts: list[str] | None = None  # ✅ Step3
 
 @app.post("/sessions")
 def create_session(body: SessionCreate):
@@ -128,27 +78,16 @@ def create_session(body: SessionCreate):
         team = db.get(Team, body.team_id)
         if not team:
             raise HTTPException(404, "team not found")
+
+        parts = body.parts if body.parts and len(body.parts) > 0 else None
         s = DbSession(team_id=body.team_id, title=body.title, status="ACTIVE")
+        if parts is not None:
+            s.parts = parts
+
         db.add(s)
         db.commit()
         db.refresh(s)
-        return {"id": s.id, "team_id": s.team_id, "title": s.title, "status": s.status}
-
-
-@app.get("/teams/{team_id}/sessions")
-def list_sessions(team_id: str):
-    with SessionLocal() as db:
-        rows = (
-            db.execute(
-                select(DbSession)
-                .where(DbSession.team_id == team_id)
-                .order_by(DbSession.created_at.desc())
-            )
-            .scalars()
-            .all()
-        )
-        return [{"id": r.id, "title": r.title, "status": r.status, "created_at": str(r.created_at)} for r in rows]
-
+        return {"id": s.id, "team_id": s.team_id, "title": s.title, "status": s.status, "parts": s.parts}
 
 @app.get("/sessions/{session_id}")
 def get_session(session_id: str):
@@ -156,10 +95,13 @@ def get_session(session_id: str):
         s = db.get(DbSession, session_id)
         if not s:
             raise HTTPException(404, "session not found")
-        return {"id": s.id, "team_id": s.team_id, "title": s.title, "status": s.status}
+        return {"id": s.id, "team_id": s.team_id, "title": s.title, "status": s.status, "parts": s.parts}
 
+# join
+class JoinSessionBody(BaseModel):
+    user_name: str
+    part: str | None = None
 
-# Step2: join participant (first join => LEADER)
 @app.post("/sessions/{session_id}/join")
 def join_session(session_id: str, body: JoinSessionBody):
     with SessionLocal() as db:
@@ -184,21 +126,17 @@ def join_session(session_id: str, body: JoinSessionBody):
         db.commit()
         db.refresh(p)
 
-        # LEADER는 기본 broadcast 허용
+        # leader default grant
         if p.role == "LEADER":
-            g = DbGrant(session_id=session_id, user_name=p.id, can_broadcast=True)
-            db.add(g)
-            db.commit()
+            existing = (
+                db.execute(select(DbGrant).where(DbGrant.session_id == session_id, DbGrant.user_name == p.id))
+                .scalar_one_or_none()
+            )
+            if not existing:
+                db.add(DbGrant(session_id=session_id, user_name=p.id, can_broadcast=True))
+                db.commit()
 
-        return {
-            "participant": {
-                "id": p.id,
-                "user_name": p.user_name,
-                "part": p.part,
-                "role": p.role,
-            }
-        }
-
+        return {"participant": {"id": p.id, "user_name": p.user_name, "part": p.part, "role": p.role}}
 
 @app.get("/sessions/{session_id}/participants")
 def list_participants(session_id: str):
@@ -212,45 +150,39 @@ def list_participants(session_id: str):
             .scalars()
             .all()
         )
-        return [
-            {"id": r.id, "user_name": r.user_name, "part": r.part, "role": r.role}
-            for r in rows
-        ]
+        return [{"id": r.id, "user_name": r.user_name, "part": r.part, "role": r.role} for r in rows]
 
-
-# ---------- Permissions (Step2) ----------
+# ---------- Permissions ----------
 class BroadcastPermissionBody(BaseModel):
     participant_id: str
     can_broadcast: bool = True
 
-
 @app.post("/sessions/{session_id}/broadcast-permissions")
-def set_broadcast_permission(session_id: str, body: BroadcastPermissionBody):
+async def set_broadcast_permission(session_id: str, body: BroadcastPermissionBody):
     with SessionLocal() as db:
         p = db.get(SessionParticipant, body.participant_id)
         if not p or p.session_id != session_id:
             raise HTTPException(404, "participant not found")
 
+        if p.role == "LEADER":
+            body.can_broadcast = True
+
         existing = (
-            db.execute(
-                select(DbGrant).where(
-                    DbGrant.session_id == session_id,
-                    DbGrant.user_name == body.participant_id,  # participant_id stored here
-                )
-            )
+            db.execute(select(DbGrant).where(DbGrant.session_id == session_id, DbGrant.user_name == body.participant_id))
             .scalar_one_or_none()
         )
-
         if existing:
             existing.can_broadcast = body.can_broadcast
             db.commit()
         else:
-            g = DbGrant(session_id=session_id, user_name=body.participant_id, can_broadcast=body.can_broadcast)
-            db.add(g)
+            db.add(DbGrant(session_id=session_id, user_name=body.participant_id, can_broadcast=body.can_broadcast))
             db.commit()
 
-        return {"ok": True}
-
+    await hub.broadcast(session_id, {
+        "type": "PERMISSION_UPDATED",
+        "data": {"participant_id": body.participant_id, "can_broadcast": body.can_broadcast}
+    })
+    return {"ok": True}
 
 @app.get("/sessions/{session_id}/broadcast-permissions")
 def list_broadcast_permissions(session_id: str):
@@ -258,26 +190,15 @@ def list_broadcast_permissions(session_id: str):
         rows = db.execute(select(DbGrant).where(DbGrant.session_id == session_id)).scalars().all()
         return [{"participant_id": r.user_name, "can_broadcast": r.can_broadcast} for r in rows]
 
-
-# ---------- Presets ----------
+# ---------- Presets (Step3) ----------
 class PresetCreate(BaseModel):
     team_id: str
-    label: str
-    payload: dict
+    title: str
+    text: str | None = None
 
-
-@app.post("/presets")
-def create_preset(body: PresetCreate):
-    with SessionLocal() as db:
-        team = db.get(Team, body.team_id)
-        if not team:
-            raise HTTPException(404, "team not found")
-        p = DbPreset(team_id=body.team_id, label=body.label, payload=body.payload)
-        db.add(p)
-        db.commit()
-        db.refresh(p)
-        return {"id": p.id, "team_id": p.team_id, "label": p.label, "payload": p.payload}
-
+class PresetUpdate(BaseModel):
+    title: str | None = None
+    text: str | None = None
 
 @app.get("/teams/{team_id}/presets")
 def list_presets(team_id: str):
@@ -287,37 +208,80 @@ def list_presets(team_id: str):
             .scalars()
             .all()
         )
-        return [{"id": r.id, "label": r.label, "payload": r.payload} for r in rows]
+        return [{"id": r.id, "title": r.title, "payload": r.payload} for r in rows]
 
+@app.post("/teams/{team_id}/presets")
+def create_preset(team_id: str, body: PresetCreate):
+    with SessionLocal() as db:
+        team = db.get(Team, team_id)
+        if not team:
+            raise HTTPException(404, "team not found")
 
-# ---------- Broadcast (Step2 sender_id) ----------
+        payload = {}
+        if body.text is not None:
+            payload["text"] = body.text
+
+        p = DbPreset(team_id=team_id, title=body.title.strip(), payload=payload)
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+        return {"id": p.id, "title": p.title, "payload": p.payload}
+
+@app.put("/presets/{preset_id}")
+def update_preset(preset_id: str, body: PresetUpdate):
+    with SessionLocal() as db:
+        p = db.get(DbPreset, preset_id)
+        if not p:
+            raise HTTPException(404, "preset not found")
+
+        if body.title is not None:
+            p.title = body.title.strip()
+
+        # text가 ""(빈 문자열)로 들어오면 payload에서 제거해서 "title 전송" 규칙을 만들 수 있음
+        if body.text is None:
+            pass
+        else:
+            if body.text.strip() == "":
+                # payload text 제거
+                newp = dict(p.payload or {})
+                newp.pop("text", None)
+                p.payload = newp
+            else:
+                newp = dict(p.payload or {})
+                newp["text"] = body.text
+                p.payload = newp
+
+        db.commit()
+        db.refresh(p)
+        return {"id": p.id, "title": p.title, "payload": p.payload}
+
+@app.delete("/presets/{preset_id}")
+def delete_preset(preset_id: str):
+    with SessionLocal() as db:
+        p = db.get(DbPreset, preset_id)
+        if not p:
+            raise HTTPException(404, "preset not found")
+        db.delete(p)
+        db.commit()
+        return {"ok": True}
+
+# ---------- Broadcast ----------
 class BroadcastCreate(BaseModel):
     session_id: str
-    sender_id: str          # participant_id
-    target: dict            # {"all":true} or {"parts":[...]}
-    type: str               # TEXT/PRESET/...
+    sender_id: str
+    target: dict
+    type: str
     payload: dict
-
 
 def _is_leader(db, sender_id: str) -> bool:
     p = db.get(SessionParticipant, sender_id)
     return bool(p and p.role == "LEADER")
 
-
 def _can_user_broadcast(db, session_id: str, sender_id: str) -> bool:
     if _is_leader(db, sender_id):
         return True
-    g = (
-        db.execute(
-            select(DbGrant).where(
-                DbGrant.session_id == session_id,
-                DbGrant.user_name == sender_id,  # participant_id stored here
-            )
-        )
-        .scalar_one_or_none()
-    )
+    g = db.execute(select(DbGrant).where(DbGrant.session_id == session_id, DbGrant.user_name == sender_id)).scalar_one_or_none()
     return bool(g and g.can_broadcast)
-
 
 @app.post("/broadcasts")
 async def create_broadcast(body: BroadcastCreate):
@@ -340,7 +304,6 @@ async def create_broadcast(body: BroadcastCreate):
         db.commit()
         db.refresh(b)
 
-        # sender info (for UI)
         sp = db.get(SessionParticipant, body.sender_id)
         sender = None
         if sp:
@@ -358,32 +321,5 @@ async def create_broadcast(body: BroadcastCreate):
                 "created_at": str(b.created_at),
             },
         }
-
         await hub.broadcast(b.session_id, event)
         return {"id": b.id, "created_at": str(b.created_at)}
-
-
-@app.get("/sessions/{session_id}/broadcasts")
-def list_broadcasts(session_id: str, limit: int = 50):
-    with SessionLocal() as db:
-        rows = (
-            db.execute(
-                select(DbBroadcast)
-                .where(DbBroadcast.session_id == session_id)
-                .order_by(DbBroadcast.created_at.desc())
-                .limit(limit)
-            )
-            .scalars()
-            .all()
-        )
-        return [
-            {
-                "id": r.id,
-                "sender_id": r.sender_id,
-                "target": r.target,
-                "type": r.type,
-                "payload": r.payload,
-                "created_at": str(r.created_at),
-            }
-            for r in rows
-        ]
