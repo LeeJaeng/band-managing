@@ -39,12 +39,7 @@ jobs:
             echo "== health check =="
             ok=0
             for i in {1..18}; do
-              if docker compose exec -T api python - <<'PY'
-import urllib.request
-r = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
-print(r.status)
-PY
-              then
+              if docker compose exec -T api python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5); print(r.status)"; then
                 ok=1
                 echo "api container health check passed"
                 break
