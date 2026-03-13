@@ -50,6 +50,12 @@ jobs:
 
             if [ "$ok" -ne 1 ]; then
               echo "health check failed"
+              echo "== nginx logs =="
+              docker compose logs --tail=80 nginx || true
+              echo "== api logs =="
+              docker compose logs --tail=80 api || true
+              echo "== web logs =="
+              docker compose logs --tail=80 web || true
               exit 1
             fi
 
