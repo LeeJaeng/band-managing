@@ -33,11 +33,19 @@
 
   const newPresetTitle = ref("");
   const newPresetText = ref("");
+  const presetSaving = ref(false);
 
   // 수정 모드
   const editingPresetId = ref<string | null>(null);
   const editTitle = ref("");
   const editText = ref("");
+
+  const normalizedNewPresetTitle = computed(() => newPresetTitle.value.trim());
+  const normalizedNewPresetText = computed(() => newPresetText.value.trim());
+  const normalizedEditTitle = computed(() => editTitle.value.trim());
+  const normalizedEditText = computed(() => editText.value.trim());
+  const canCreatePreset = computed(() => isLeader.value && normalizedNewPresetTitle.value.length > 0 && normalizedNewPresetTitle.value.length <= 40 && normalizedNewPresetText.value.length <= 120);
+  const canUpdatePreset = computed(() => isLeader.value && !!editingPresetId.value && normalizedEditTitle.value.length > 0 && normalizedEditTitle.value.length <= 40 && normalizedEditText.value.length <= 120);
   
   // 오버레이 시간(초) - 개인 설정
   const overlaySeconds = ref<number>(4);
@@ -218,54 +226,105 @@
     editingPresetId.value = null;
     editTitle.value = "";
     editText.value = "";
+    presetErr.value = null;
   }
 
   async function createPreset() {
     if (!isLeader.value) return;
     if (!sessionInfo.value?.team_id) return;
 
-    const title = newPresetTitle.value.trim();
-    const text = newPresetText.value.trim();
+    const title = normalizedNewPresetTitle.value;
+    const text = normalizedNewPresetText.value;
 
-    if (!title) return;
+    if (!title) {
+      presetErr.value = "버튼명을 입력해주세요.";
+      return;
+    }
+    if (title.length > 40) {
+      presetErr.value = "버튼명은 40자 이하로 입력해주세요.";
+      return;
+    }
+    if (text.length > 120) {
+      presetErr.value = "전송 내용은 120자 이하로 입력해주세요.";
+      return;
+    }
 
-    await $fetch(`/api/teams/${encodeURIComponent(sessionInfo.value.team_id)}/presets`, {
-      method: "POST",
-      body: { team_id: sessionInfo.value.team_id, title, text: text || null },
-    });
+    presetSaving.value = true;
+    presetErr.value = null;
+    try {
+      await $fetch(`/api/teams/${encodeURIComponent(sessionInfo.value.team_id)}/presets`, {
+        method: "POST",
+        body: { team_id: sessionInfo.value.team_id, title, text: text || null },
+      });
 
-    newPresetTitle.value = "";
-    newPresetText.value = "";
-    await refreshPresets();
+      newPresetTitle.value = "";
+      newPresetText.value = "";
+      await refreshPresets();
+    } catch (e: any) {
+      presetErr.value = e?.message ?? String(e);
+    } finally {
+      presetSaving.value = false;
+    }
   }
 
   async function updatePreset() {
     if (!isLeader.value) return;
     if (!editingPresetId.value) return;
 
-    const title = editTitle.value.trim();
-    const text = editText.value.trim();
+    const title = normalizedEditTitle.value;
+    const text = normalizedEditText.value;
 
-    if (!title) return;
+    if (!title) {
+      presetErr.value = "버튼명을 입력해주세요.";
+      return;
+    }
+    if (title.length > 40) {
+      presetErr.value = "버튼명은 40자 이하로 입력해주세요.";
+      return;
+    }
+    if (text.length > 120) {
+      presetErr.value = "전송 내용은 120자 이하로 입력해주세요.";
+      return;
+    }
 
-    await $fetch(`/api/presets/${encodeURIComponent(editingPresetId.value)}`, {
-      method: "PUT",
-      body: { title, text }, // text가 ""면 서버에서 payload.text 제거하도록 되어있으면 “title 전송”이 됨
-    });
+    presetSaving.value = true;
+    presetErr.value = null;
+    try {
+      await $fetch(`/api/presets/${encodeURIComponent(editingPresetId.value)}`, {
+        method: "PUT",
+        body: { title, text }, // text가 ""면 서버에서 payload.text 제거하도록 되어있으면 “title 전송”이 됨
+      });
 
-    cancelEdit();
-    await refreshPresets();
+      cancelEdit();
+      await refreshPresets();
+    } catch (e: any) {
+      presetErr.value = e?.message ?? String(e);
+    } finally {
+      presetSaving.value = false;
+    }
   }
 
-  async function deletePreset(id: string) {
+  async function deletePreset(id: string, title?: string) {
     if (!isLeader.value) return;
+    if (process.client) {
+      const ok = window.confirm(`프리셋 \"${title || "이 항목"}\"을 삭제할까요?`);
+      if (!ok) return;
+    }
 
-    await $fetch(`/api/presets/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
+    presetSaving.value = true;
+    presetErr.value = null;
+    try {
+      await $fetch(`/api/presets/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
 
-    if (editingPresetId.value === id) cancelEdit();
-    await refreshPresets();
+      if (editingPresetId.value === id) cancelEdit();
+      await refreshPresets();
+    } catch (e: any) {
+      presetErr.value = e?.message ?? String(e);
+    } finally {
+      presetSaving.value = false;
+    }
   }
   
   async function send(text: string) {
@@ -450,10 +509,15 @@
             <!-- Create -->
             <div class="label">새 프리셋 추가</div>
             <div class="row">
-              <input class="input" style="flex:1; min-width: 180px;" v-model="newPresetTitle" placeholder="버튼명(title)" />
-              <input class="input" style="flex:2; min-width: 240px;" v-model="newPresetText" placeholder="전송 내용(text, 비우면 title 전송)" />
-              <button class="btn-primary" :disabled="presetsLoading" @click="createPreset">추가</button>
+              <input class="input" style="flex:1; min-width: 180px;" v-model="newPresetTitle" maxlength="40" placeholder="버튼명(title)" />
+              <input class="input" style="flex:2; min-width: 240px;" v-model="newPresetText" maxlength="120" placeholder="전송 내용(text, 비우면 title 전송)" />
+              <button class="btn-primary" :disabled="presetsLoading || presetSaving || !canCreatePreset" @click="createPreset">
+                {{ presetSaving ? "저장 중..." : "추가" }}
+              </button>
             </div>
+            <p class="small" style="margin-top: 6px;">
+              버튼명 40자 / 전송 내용 120자까지 입력할 수 있습니다.
+            </p>
 
             <div class="hr"></div>
 
@@ -474,8 +538,8 @@
                 </div>
 
                 <div class="row">
-                  <button class="btn" @click="startEdit(p)">수정</button>
-                  <button class="btn-danger" @click="deletePreset(p.id)">삭제</button>
+                  <button class="btn" :disabled="presetSaving" @click="startEdit(p)">수정</button>
+                  <button class="btn-danger" :disabled="presetSaving" @click="deletePreset(p.id, p.title)">삭제</button>
                 </div>
               </div>
 
@@ -484,10 +548,12 @@
               <div v-if="editingPresetId === p.id">
                 <div class="label">수정</div>
                 <div class="row">
-                  <input class="input" style="flex:1; min-width: 180px;" v-model="editTitle" placeholder="버튼명(title)" />
-                  <input class="input" style="flex:2; min-width: 240px;" v-model="editText" placeholder="전송 내용(text, 비우면 title 전송)" />
-                  <button class="btn-primary" @click="updatePreset">저장</button>
-                  <button class="btn" @click="cancelEdit">취소</button>
+                  <input class="input" style="flex:1; min-width: 180px;" v-model="editTitle" maxlength="40" placeholder="버튼명(title)" />
+                  <input class="input" style="flex:2; min-width: 240px;" v-model="editText" maxlength="120" placeholder="전송 내용(text, 비우면 title 전송)" />
+                  <button class="btn-primary" :disabled="presetSaving || !canUpdatePreset" @click="updatePreset">
+                    {{ presetSaving ? "저장 중..." : "저장" }}
+                  </button>
+                  <button class="btn" :disabled="presetSaving" @click="cancelEdit">취소</button>
                 </div>
                 <p class="small" style="margin-top: 6px;">
                   text를 빈 값으로 저장하면 “title 전송” 규칙이 적용됩니다.
