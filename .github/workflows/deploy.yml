@@ -37,6 +37,20 @@ jobs:
             docker compose ps
 
             echo "== health check =="
-            curl -f http://localhost/api/health
+            ok=0
+            for i in {1..12}; do
+              if curl -fsS http://localhost/api/health; then
+                ok=1
+                echo "health check passed"
+                break
+              fi
+              echo "waiting for service... ($i/12)"
+              sleep 5
+            done
+
+            if [ "$ok" -ne 1 ]; then
+              echo "health check failed"
+              exit 1
+            fi
 
             echo "== deploy done =="
