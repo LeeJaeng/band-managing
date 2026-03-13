@@ -1,0 +1,42 @@
+name: Deploy to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          port: ${{ secrets.LIGHTSAIL_PORT }}
+          script: |
+            set -e
+            cd /home/ubuntu/band-managing
+
+            echo "== current commit =="
+            git rev-parse HEAD || true
+
+            echo "== pulling latest =="
+            git pull origin main
+
+            echo "== deployed commit =="
+            git rev-parse HEAD
+
+            echo "== rebuilding containers =="
+            docker compose up -d --build
+
+            echo "== compose status =="
+            docker compose ps
+
+            echo "== health check =="
+            curl -f http://localhost/api/health
+
+            echo "== deploy done =="
