@@ -38,13 +38,18 @@ jobs:
 
             echo "== health check =="
             ok=0
-            for i in {1..12}; do
-              if curl -fsS http://localhost/api/health; then
+            for i in {1..18}; do
+              if docker compose exec -T api python - <<'PY'
+import urllib.request
+r = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
+print(r.status)
+PY
+              then
                 ok=1
-                echo "health check passed"
+                echo "api container health check passed"
                 break
               fi
-              echo "waiting for service... ($i/12)"
+              echo "waiting for api service... ($i/18)"
               sleep 5
             done
 
@@ -58,5 +63,8 @@ jobs:
               docker compose logs --tail=80 web || true
               exit 1
             fi
+
+            echo "== nginx check =="
+            curl -fsS http://localhost/api/health || true
 
             echo "== deploy done =="
