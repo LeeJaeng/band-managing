@@ -9,6 +9,7 @@
     getOverlaySeconds,
     setOverlaySeconds,
   } from "~/composables/useSessionState";
+  import { copyText } from "~/composables/useClipboard";
   
   const route = useRoute();
   
@@ -30,6 +31,7 @@
   const presets = ref<any[]>([]);
   const presetsLoading = ref(false);
   const presetErr = ref<string | null>(null);
+  const shareMsg = ref<string | null>(null);
 
   const newPresetTitle = ref("");
   const newPresetText = ref("");
@@ -162,6 +164,13 @@
     const { participant_id, can_broadcast } = permEvt.data;
     permMap.value = { ...permMap.value, [participant_id]: !!can_broadcast };
   });
+
+  watchEffect(() => {
+    const presetEvt = events.value.find((e: any) => e?.type === "PRESETS_UPDATED") as any;
+    if (!presetEvt?.data?.team_id) return;
+    if (presetEvt.data.team_id !== sessionInfo.value?.team_id) return;
+    refreshPresets();
+  });
   
   const isLeader = computed(() => myRole.value === "LEADER");
   const canBroadcast = computed(() => isLeader.value || !!permMap.value[pid.value]);
@@ -189,11 +198,12 @@
   // ✅ 공유 링크 복사 (요구사항 6)
   async function copyShareLink() {
     const url = `${location.origin}/join?sid=${encodeURIComponent(sid.value)}`;
-    await navigator.clipboard.writeText(url);
-    // 가벼운 피드백: 오버레이를 잠깐 띄움
-    overlayVisible.value = true;
+    const ok = await copyText(url);
+    shareMsg.value = ok ? "공유 링크를 복사했습니다." : "복사에 실패했습니다. 직접 길게 눌러 복사해주세요.";
     if (overlayTimer) clearTimeout(overlayTimer);
-    overlayTimer = setTimeout(() => (overlayVisible.value = false), 1200);
+    overlayTimer = setTimeout(() => {
+      shareMsg.value = null;
+    }, 1500);
   }
   
   // ✅ 나가기 (요구사항 1)
@@ -411,6 +421,7 @@
                 <button class="btn" @click="copyShareLink">공유 링크 복사</button>
                 <button class="btn-danger" @click="leaveSession">나가기</button>
               </div>
+              <div v-if="shareMsg" class="small" style="margin-top: 8px;">{{ shareMsg }}</div>
             </div>
           </div>
   

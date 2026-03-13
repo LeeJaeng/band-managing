@@ -7,7 +7,7 @@ import uuid
 def _uuid():
     return str(uuid.uuid4())
 
-DEFAULT_PARTS = ["Vocal", "Keys", "Guitar", "Bass", "Drums"]
+DEFAULT_PARTS = ["보컬", "피아노", "신디", "기타", "베이스", "드럼", "리더", "설교자", "음향", "영상"]
 
 class Team(Base):
     __tablename__ = "teams"

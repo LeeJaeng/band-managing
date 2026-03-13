@@ -9,7 +9,7 @@
   const name = ref("");
   const part = ref("");
   
-  const parts = ref<string[]>(["Vocal", "Keys", "Guitar", "Bass", "Drums"]);
+  const parts = ref<string[]>(["보컬", "피아노", "신디", "기타", "베이스", "드럼", "리더", "설교자", "음향", "영상"]);
   const sessionTitle = ref<string>("");
   
   const err = ref<string | null>(null);

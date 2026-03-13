@@ -210,8 +210,20 @@ def list_presets(team_id: str):
         )
         return [{"id": r.id, "title": r.title, "payload": r.payload} for r in rows]
 
+async def _broadcast_presets_updated(team_id: str):
+    with SessionLocal() as db:
+        session_ids = (
+            db.execute(select(DbSession.id).where(DbSession.team_id == team_id, DbSession.status == "ACTIVE"))
+            .scalars()
+            .all()
+        )
+
+    payload = {"type": "PRESETS_UPDATED", "data": {"team_id": team_id}}
+    for session_id in session_ids:
+        await hub.broadcast(session_id, payload)
+
 @app.post("/teams/{team_id}/presets")
-def create_preset(team_id: str, body: PresetCreate):
+async def create_preset(team_id: str, body: PresetCreate):
     with SessionLocal() as db:
         team = db.get(Team, team_id)
         if not team:
@@ -225,14 +237,18 @@ def create_preset(team_id: str, body: PresetCreate):
         db.add(p)
         db.commit()
         db.refresh(p)
-        return {"id": p.id, "title": p.title, "payload": p.payload}
+        result = {"id": p.id, "title": p.title, "payload": p.payload}
+
+    await _broadcast_presets_updated(team_id)
+    return result
 
 @app.put("/presets/{preset_id}")
-def update_preset(preset_id: str, body: PresetUpdate):
+async def update_preset(preset_id: str, body: PresetUpdate):
     with SessionLocal() as db:
         p = db.get(DbPreset, preset_id)
         if not p:
             raise HTTPException(404, "preset not found")
+        team_id = p.team_id
 
         if body.title is not None:
             p.title = body.title.strip()
@@ -253,17 +269,23 @@ def update_preset(preset_id: str, body: PresetUpdate):
 
         db.commit()
         db.refresh(p)
-        return {"id": p.id, "title": p.title, "payload": p.payload}
+        result = {"id": p.id, "title": p.title, "payload": p.payload}
+
+    await _broadcast_presets_updated(team_id)
+    return result
 
 @app.delete("/presets/{preset_id}")
-def delete_preset(preset_id: str):
+async def delete_preset(preset_id: str):
     with SessionLocal() as db:
         p = db.get(DbPreset, preset_id)
         if not p:
             raise HTTPException(404, "preset not found")
+        team_id = p.team_id
         db.delete(p)
         db.commit()
-        return {"ok": True}
+
+    await _broadcast_presets_updated(team_id)
+    return {"ok": True}
 
 # ---------- Broadcast ----------
 class BroadcastCreate(BaseModel):

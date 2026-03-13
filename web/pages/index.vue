@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { clearActiveSession, loadActiveSession, type StoredSession } from "~/composables/useSessionState";
+import { copyText } from "~/composables/useClipboard";
 
 const creating = ref(false);
 const err = ref<string | null>(null);
@@ -9,7 +10,8 @@ const activeSession = ref<StoredSession | null>(null);
 
 const roomTitle = ref("Sunday Session");
 const partInput = ref("");
-const customParts = ref<string[]>(["Vocal", "Keys", "Guitar", "Bass", "Drums"]);
+const DEFAULT_PARTS = ["보컬", "피아노", "신디", "기타", "베이스", "드럼", "리더", "설교자", "음향", "영상"];
+const customParts = ref<string[]>([...DEFAULT_PARTS]);
 
 const canCreate = computed(() => roomTitle.value.trim().length > 0);
 const canAddPart = computed(() => partInput.value.trim().length > 0 && customParts.value.length < 30);
@@ -54,7 +56,7 @@ function removePart(idx: number) {
 }
 
 function resetParts() {
-  customParts.value = ["Vocal", "Keys", "Guitar", "Bass", "Drums"];
+  customParts.value = [...DEFAULT_PARTS];
   partInput.value = "";
 }
 
@@ -112,11 +114,11 @@ function leaveStoredSession() {
 
 async function copyActiveShareLink() {
   if (!shareLink.value || !process.client) return;
-  await navigator.clipboard.writeText(shareLink.value);
-  copyMsg.value = "공유 링크를 복사했습니다.";
+  const ok = await copyText(shareLink.value);
+  copyMsg.value = ok ? "공유 링크를 복사했습니다." : "복사에 실패했습니다. 직접 길게 눌러 복사해주세요.";
   setTimeout(() => {
     copyMsg.value = null;
-  }, 1500);
+  }, 1800);
 }
 </script>
 
