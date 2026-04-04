@@ -15,6 +15,19 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+# ── Users ─────────────────────────────────────────────
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), default="MEMBER")  # ADMIN / MEMBER
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 # ── Songs ──────────────────────────────────────────────
 
 class Song(Base):
@@ -26,6 +39,7 @@ class Song(Base):
     default_key: Mapped[str | None] = mapped_column(String(10), nullable=True)
     keys: Mapped[list | None] = mapped_column(JSON, nullable=True)  # ["A", "Bb", "G"]
     lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(10), default="MANUAL")  # CRAWLED / MANUAL / USER
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -82,6 +96,9 @@ class Conti(Base):
     items: Mapped[list["ContiItem"]] = relationship(
         back_populates="conti", cascade="all, delete-orphan", order_by="ContiItem.order_num"
     )
+    members: Mapped[list["ContiMember"]] = relationship(
+        back_populates="conti", cascade="all, delete-orphan"
+    )
 
 
 class ContiItem(Base):
@@ -100,6 +117,31 @@ class ContiItem(Base):
     conti: Mapped["Conti"] = relationship(back_populates="items")
     song: Mapped["Song"] = relationship()
     reference: Mapped["SongReference | None"] = relationship()
+
+
+class ContiMember(Base):
+    __tablename__ = "conti_members"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    conti_id: Mapped[str] = mapped_column(String, ForeignKey("contis.id", ondelete="CASCADE"), nullable=False)
+    member_id: Mapped[str] = mapped_column(String, ForeignKey("team_members.id"), nullable=False)
+    position: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    conti: Mapped["Conti"] = relationship(back_populates="members")
+    member: Mapped["TeamMember"] = relationship()
+
+
+# ── Team ──────────────────────────────────────────────
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    position: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
 # ── Crawl ──────────────────────────────────────────────

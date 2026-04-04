@@ -1,11 +1,70 @@
 <script setup lang="ts">
+definePageMeta({ middleware: 'admin' })
 const { api } = useApi()
 
 const channels = ref<any[]>([])
 const logs = ref<any[]>([])
 const reviewQueue = ref<any[]>([])
+const members = ref<any[]>([])
+const userSongs = ref<any[]>([])
 const loading = ref(true)
 const crawling = ref(false)
+
+// 팀원 관리
+const POSITIONS = ['피아노', '신디', '드럼', '베이스', '보컬', '기타', '어쿠스틱', '기타(일렉)']
+const showMemberForm = ref(false)
+const editingMemberId = ref<string | null>(null)
+const memberForm = ref({ name: '', position: '보컬' })
+
+function openMemberAdd() {
+  editingMemberId.value = null
+  memberForm.value = { name: '', position: '보컬' }
+  showMemberForm.value = true
+}
+
+function openMemberEdit(m: any) {
+  editingMemberId.value = m.id
+  memberForm.value = { name: m.name, position: m.position }
+  showMemberForm.value = true
+}
+
+async function saveMember() {
+  if (!memberForm.value.name.trim()) { alert('이름을 입력해주세요.'); return }
+  try {
+    if (editingMemberId.value) {
+      await api(`/api/team/members/${editingMemberId.value}`, {
+        method: 'PUT',
+        body: JSON.stringify(memberForm.value),
+      })
+    } else {
+      await api('/api/team/members', {
+        method: 'POST',
+        body: JSON.stringify(memberForm.value),
+      })
+    }
+    showMemberForm.value = false
+    editingMemberId.value = null
+    await load()
+  } catch (e: any) { alert(e.message || '저장 실패') }
+}
+
+async function toggleMember(m: any) {
+  try {
+    await api(`/api/team/members/${m.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_active: !m.is_active }),
+    })
+    await load()
+  } catch (e: any) { alert(e.message || '수정 실패') }
+}
+
+async function deleteMember(m: any) {
+  if (!confirm(`"${m.name}" 팀원을 삭제하시겠습니까?`)) return
+  try {
+    await api(`/api/team/members/${m.id}`, { method: 'DELETE' })
+    await load()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
 
 // 채널 등록/편집
 const showChannelForm = ref(false)
@@ -16,14 +75,18 @@ const resolving = ref(false)
 async function load() {
   loading.value = true
   const t = Date.now()
-  const [ch, lg, rq] = await Promise.all([
+  const [ch, lg, rq, mb, us] = await Promise.all([
     api<any[]>(`/api/admin/channels?_t=${t}`),
     api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`),
     api<any[]>(`/api/admin/review-queue?status=PENDING&_t=${t}`),
+    api<any>(`/api/team/members?_t=${t}`),
+    api<any>(`/api/songs?source=USER&_t=${t}`),
   ])
   channels.value = ch
   logs.value = lg
   reviewQueue.value = rq
+  members.value = mb.items || []
+  userSongs.value = us.items || []
   loading.value = false
 }
 
@@ -177,6 +240,24 @@ async function approveWithSong(rq: any, songId: string) {
   await load()
 }
 
+async function approveUserSong(song: any) {
+  try {
+    await api(`/api/admin/songs/${song.id}/source`, {
+      method: 'PUT',
+      body: JSON.stringify({ source: 'MANUAL' }),
+    })
+    await load()
+  } catch (e: any) { alert(e.message || '승인 실패') }
+}
+
+async function deleteUserSong(song: any) {
+  if (!confirm(`"${song.title}" 곡을 삭제하시겠습니까?`)) return
+  try {
+    await api(`/api/songs/${song.id}`, { method: 'DELETE' })
+    await load()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
 async function rejectReview(rq: any) {
   try {
     await api(`/api/admin/review/${rq.id}/reject`, { method: 'POST' })
@@ -194,6 +275,63 @@ onMounted(load)
     <div v-if="loading" class="loading">불러오는 중...</div>
 
     <template v-else>
+      <!-- 팀원 관리 -->
+      <section class="section">
+        <div class="section-header">
+          <h2>팀원 관리 ({{ members.length }}명)</h2>
+          <button class="btn" @click="openMemberAdd">팀원 추가</button>
+        </div>
+
+        <div v-if="showMemberForm" class="add-form">
+          <h3>{{ editingMemberId ? '팀원 수정' : '팀원 추가' }}</h3>
+          <label>이름</label>
+          <input v-model="memberForm.name" class="input" placeholder="이름" />
+          <label>포지션</label>
+          <select v-model="memberForm.position" class="input">
+            <option v-for="p in POSITIONS" :key="p" :value="p">{{ p }}</option>
+          </select>
+          <div class="form-actions">
+            <button class="btn-accent" @click="saveMember">{{ editingMemberId ? '수정' : '추가' }}</button>
+            <button class="btn" @click="showMemberForm = false">취소</button>
+          </div>
+        </div>
+
+        <div v-if="members.length === 0" class="empty">등록된 팀원이 없습니다</div>
+        <div class="member-list">
+          <div v-for="m in members" :key="m.id" :class="['member-card', { inactive: !m.is_active }]">
+            <div class="member-info">
+              <span class="member-name">{{ m.name }}</span>
+              <span class="position-badge">{{ m.position }}</span>
+              <span v-if="!m.is_active" class="inactive-label">비활성</span>
+            </div>
+            <div class="member-actions">
+              <button class="btn-sm" @click="openMemberEdit(m)">수정</button>
+              <button class="btn-sm" @click="toggleMember(m)">{{ m.is_active ? '비활성화' : '활성화' }}</button>
+              <button class="btn-sm danger" @click="deleteMember(m)">삭제</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 유저 등록 곡 정제 -->
+      <section v-if="userSongs.length > 0" class="section">
+        <h2>유저 등록 곡 ({{ userSongs.length }})</h2>
+        <div class="user-song-list">
+          <div v-for="song in userSongs" :key="song.id" class="user-song-card">
+            <div class="us-info">
+              <span class="us-title">{{ song.title }}</span>
+              <span v-if="song.artist" class="us-artist">{{ song.artist }}</span>
+              <span v-if="song.default_key" class="key-badge">{{ song.default_key }}</span>
+            </div>
+            <div class="us-actions">
+              <NuxtLink :to="`/songs/${song.id}`" class="btn-sm">상세</NuxtLink>
+              <button class="btn-sm approve" @click="approveUserSong(song)">승인</button>
+              <button class="btn-sm danger" @click="deleteUserSong(song)">삭제</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- 채널 관리 -->
       <section class="section">
         <div class="section-header">
@@ -456,6 +594,73 @@ label {
   background: var(--red-soft); border-radius: var(--radius);
   margin-bottom: 6px; word-break: break-all;
 }
+
+.user-song-list { display: flex; flex-direction: column; gap: 6px; }
+
+.user-song-card {
+  @include card;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.us-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.us-title { font-weight: 600; }
+.us-artist { font-size: 13px; color: var(--text-dim); }
+
+.key-badge {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.us-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.member-list { display: flex; flex-direction: column; gap: 6px; }
+
+.member-card {
+  @include card;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+
+  &.inactive { opacity: 0.5; }
+}
+
+.member-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.member-name { font-weight: 600; }
+
+.position-badge {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inactive-label { font-size: 12px; color: var(--red); }
+
+.member-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .loading, .empty { text-align: center; padding: 20px; color: var(--text-dim); }
 

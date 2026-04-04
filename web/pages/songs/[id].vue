@@ -10,9 +10,15 @@ const editing = ref(false)
 // 편집 폼
 const editForm = ref({ title: '', keys: [] as string[], lyrics: '' })
 
-// 키 목록
-const ALL_KEYS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B',
-                  'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'A#m', 'Bbm', 'Bm']
+// 키 목록 (자주 쓰는 키 우선)
+const COMMON_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B']
+const OTHER_MAJOR_KEYS = ['C#', 'Db', 'D#', 'Eb', 'F#', 'Gb', 'G#', 'Ab', 'A#']
+const MINOR_KEYS = ['Am', 'Bm', 'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'A#m', 'Bbm']
+const ALL_KEYS = [...COMMON_KEYS, ...OTHER_MAJOR_KEYS, ...MINOR_KEYS]
+
+// 인라인 키 편집
+const showKeyPicker = ref(false)
+const showAllKeys = ref(false)
 
 // 레퍼런스 추가
 const showAddRef = ref(false)
@@ -40,6 +46,24 @@ function toggleKey(key: string) {
   } else {
     editForm.value.keys.push(key)
   }
+}
+
+// 인라인 키 추가/제거 (편집 모드 없이)
+async function toggleKeyInline(key: string) {
+  const currentKeys = [...(song.value.keys || [])]
+  const idx = currentKeys.indexOf(key)
+  if (idx >= 0) {
+    currentKeys.splice(idx, 1)
+  } else {
+    currentKeys.push(key)
+  }
+  try {
+    await api(`/api/songs/${route.params.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: song.value.title, keys: currentKeys }),
+    })
+    await load()
+  } catch (e: any) { alert(e.message || '키 저장 실패') }
 }
 
 async function saveEdit() {
@@ -132,13 +156,25 @@ onMounted(load)
         <input v-model="editForm.title" class="input" />
 
         <label>키 (복수 선택 가능)</label>
-        <div class="key-selector">
-          <button
-            v-for="k in ALL_KEYS"
-            :key="k"
-            :class="['key-chip', { selected: editForm.keys.includes(k) }]"
-            @click="toggleKey(k)"
-          >{{ k }}</button>
+        <div class="key-picker">
+          <div class="key-picker-group">
+            <span class="key-group-label">자주 쓰는 키</span>
+            <div class="key-picker-chips">
+              <button v-for="k in COMMON_KEYS" :key="k" :class="['key-chip', { selected: editForm.keys.includes(k) }]" @click="toggleKey(k)">{{ k }}</button>
+            </div>
+          </div>
+          <div class="key-picker-group">
+            <span class="key-group-label">기타 메이저</span>
+            <div class="key-picker-chips">
+              <button v-for="k in OTHER_MAJOR_KEYS" :key="k" :class="['key-chip', { selected: editForm.keys.includes(k) }]" @click="toggleKey(k)">{{ k }}</button>
+            </div>
+          </div>
+          <div class="key-picker-group">
+            <span class="key-group-label">마이너</span>
+            <div class="key-picker-chips">
+              <button v-for="k in MINOR_KEYS" :key="k" :class="['key-chip', { selected: editForm.keys.includes(k) }]" @click="toggleKey(k)">{{ k }}</button>
+            </div>
+          </div>
         </div>
 
         <label>가사 (송폼)</label>
@@ -150,13 +186,50 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- 키 -->
+      <!-- 키 (인라인 편집) -->
       <section v-if="!editing" class="section">
-        <h2>키</h2>
-        <div v-if="(song.keys || []).length === 0 && !song.default_key" class="empty-sm">등록된 키 없음</div>
-        <div v-else class="key-list">
-          <span v-for="k in (song.keys || [])" :key="k" class="key-badge">{{ k }}</span>
+        <div class="section-header">
+          <h2>키</h2>
+        </div>
+        <div class="key-inline">
+          <span v-for="k in (song.keys || [])" :key="k" class="key-badge removable" @click="toggleKeyInline(k)">{{ k }} ×</span>
           <span v-if="song.default_key && !(song.keys || []).includes(song.default_key)" class="key-badge dim">{{ song.default_key }}</span>
+          <button class="key-add-btn" @click="showKeyPicker = !showKeyPicker">+</button>
+        </div>
+        <div v-if="showKeyPicker" class="key-picker">
+          <div class="key-picker-group">
+            <span class="key-group-label">자주 쓰는 키</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in COMMON_KEYS" :key="k"
+                :class="['key-chip', { selected: (song.keys || []).includes(k) }]"
+                @click="toggleKeyInline(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <div v-if="showAllKeys" class="key-picker-group">
+            <span class="key-group-label">기타 메이저</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in OTHER_MAJOR_KEYS" :key="k"
+                :class="['key-chip', { selected: (song.keys || []).includes(k) }]"
+                @click="toggleKeyInline(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <div v-if="showAllKeys" class="key-picker-group">
+            <span class="key-group-label">마이너</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in MINOR_KEYS" :key="k"
+                :class="['key-chip', { selected: (song.keys || []).includes(k) }]"
+                @click="toggleKeyInline(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <button class="key-more-btn" @click="showAllKeys = !showAllKeys">
+            {{ showAllKeys ? '접기' : '더보기 (기타 키)' }}
+          </button>
         </div>
       </section>
 
@@ -249,12 +322,6 @@ onMounted(load)
   label { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-top: 4px; }
 }
 
-.key-selector {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .key-chip {
   padding: 4px 12px;
   border-radius: 8px;
@@ -299,7 +366,12 @@ onMounted(load)
   h2 { margin: 0; }
 }
 
-.key-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
 
 .key-badge {
   background: var(--accent-soft);
@@ -311,6 +383,64 @@ onMounted(load)
 
   &.sm { font-size: 12px; padding: 1px 8px; }
   &.dim { opacity: 0.5; }
+  &.removable {
+    cursor: pointer;
+    &:hover { background: var(--red-soft); color: var(--red); }
+  }
+}
+
+.key-add-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px dashed var(--text-dim);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover { border-color: var(--accent); color: var(--accent); }
+}
+
+.key-picker {
+  @include card;
+  padding: 14px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.key-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.key-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.key-more-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+  &:hover { color: var(--accent); }
 }
 
 .add-form {

@@ -4,7 +4,8 @@ from sqlalchemy import or_
 from pydantic import BaseModel
 
 from db import get_db
-from models import Song, SongReference, SongSheet
+from models import Song, SongReference, SongSheet, User
+from auth import get_current_user, get_current_user_optional
 
 router = APIRouter(prefix="/api/songs", tags=["songs"])
 
@@ -56,6 +57,7 @@ class SheetCreate(BaseModel):
 @router.get("")
 def list_songs(
     q: str = Query(default="", description="검색어 (제목/가사)"),
+    source: str = Query(default="", description="소스 필터 (CRAWLED/MANUAL/USER)"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -64,6 +66,8 @@ def list_songs(
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Song.title.ilike(like), Song.lyrics.ilike(like)))
+    if source:
+        query = query.filter(Song.source == source)
     total = query.count()
     songs = (
         query.options(joinedload(Song.references))
@@ -77,6 +81,7 @@ def list_songs(
                 "title": s.title,
                 "artist": s.artist,
                 "default_key": s.default_key,
+                "source": s.source,
                 "ref_count": len(s.references),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
@@ -102,6 +107,7 @@ def get_song(song_id: str, db: Session = Depends(get_db)):
         "default_key": song.default_key,
         "keys": song.keys or [],
         "lyrics": song.lyrics,
+        "source": song.source,
         "created_at": song.created_at.isoformat() if song.created_at else None,
         "updated_at": song.updated_at.isoformat() if song.updated_at else None,
         "references": [
@@ -132,8 +138,9 @@ def get_song(song_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("", status_code=201)
-def create_song(body: SongCreate, db: Session = Depends(get_db)):
-    song = Song(title=body.title, artist=body.artist, default_key=body.default_key, lyrics=body.lyrics)
+def create_song(body: SongCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    source = "MANUAL" if user.role == "ADMIN" else "USER"
+    song = Song(title=body.title, artist=body.artist, default_key=body.default_key, keys=body.keys, lyrics=body.lyrics, source=source)
     db.add(song)
     db.commit()
     db.refresh(song)
@@ -141,7 +148,7 @@ def create_song(body: SongCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{song_id}")
-def update_song(song_id: str, body: SongUpdate, db: Session = Depends(get_db)):
+def update_song(song_id: str, body: SongUpdate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
@@ -153,7 +160,7 @@ def update_song(song_id: str, body: SongUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{song_id}")
-def delete_song(song_id: str, db: Session = Depends(get_db)):
+def delete_song(song_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
@@ -170,7 +177,7 @@ def delete_song(song_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/merge")
-def merge_songs(source_id: str, target_id: str, db: Session = Depends(get_db)):
+def merge_songs(source_id: str, target_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """source 곡의 레퍼런스/악보를 target으로 옮기고 source 삭제."""
     source = db.query(Song).filter(Song.id == source_id).first()
     target = db.query(Song).filter(Song.id == target_id).first()
@@ -213,7 +220,7 @@ def list_references(song_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{song_id}/references", status_code=201)
-def add_reference(song_id: str, body: ReferenceCreate, db: Session = Depends(get_db)):
+def add_reference(song_id: str, body: ReferenceCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
@@ -225,7 +232,7 @@ def add_reference(song_id: str, body: ReferenceCreate, db: Session = Depends(get
 
 
 @router.put("/references/{ref_id}")
-def update_reference(ref_id: str, body: ReferenceUpdate, db: Session = Depends(get_db)):
+def update_reference(ref_id: str, body: ReferenceUpdate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     ref = db.query(SongReference).filter(SongReference.id == ref_id).first()
     if not ref:
         raise HTTPException(404, "Reference not found")
@@ -236,7 +243,7 @@ def update_reference(ref_id: str, body: ReferenceUpdate, db: Session = Depends(g
 
 
 @router.delete("/references/{ref_id}")
-def delete_reference(ref_id: str, db: Session = Depends(get_db)):
+def delete_reference(ref_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     ref = db.query(SongReference).filter(SongReference.id == ref_id).first()
     if not ref:
         raise HTTPException(404, "Reference not found")
@@ -263,7 +270,7 @@ def list_sheets(song_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{song_id}/sheets", status_code=201)
-def upload_sheet(song_id: str, body: SheetCreate, db: Session = Depends(get_db)):
+def upload_sheet(song_id: str, body: SheetCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
@@ -275,7 +282,7 @@ def upload_sheet(song_id: str, body: SheetCreate, db: Session = Depends(get_db))
 
 
 @router.delete("/sheets/{sheet_id}")
-def delete_sheet(sheet_id: str, db: Session = Depends(get_db)):
+def delete_sheet(sheet_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sheet = db.query(SongSheet).filter(SongSheet.id == sheet_id).first()
     if not sheet:
         raise HTTPException(404, "Sheet not found")

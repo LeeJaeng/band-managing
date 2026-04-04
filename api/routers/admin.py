@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from db import get_db
-from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference
+from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference, User
+from auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -35,7 +36,7 @@ class ReviewApprove(BaseModel):
 # ── Channels ───────────────────────────────────────────
 
 @router.get("/channels")
-def list_channels(db: Session = Depends(get_db)):
+def list_channels(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     channels = db.query(CrawlChannel).order_by(CrawlChannel.name).all()
     return [
         {
@@ -52,7 +53,7 @@ def list_channels(db: Session = Depends(get_db)):
 
 
 @router.get("/channels/resolve-id")
-def resolve_channel_id(youtube_channel_id: str = Query(...)):
+def resolve_channel_id(youtube_channel_id: str = Query(...), _: User = Depends(require_admin)):
     """@handle이나 UC...를 실제 채널 ID로 변환."""
     import os
     api_key = os.getenv("YOUTUBE_API_KEY", "")
@@ -83,7 +84,7 @@ def resolve_channel_id(youtube_channel_id: str = Query(...)):
 
 
 @router.post("/channels", status_code=201)
-def create_channel(body: ChannelCreate, db: Session = Depends(get_db)):
+def create_channel(body: ChannelCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     existing = db.query(CrawlChannel).filter(CrawlChannel.youtube_channel_id == body.youtube_channel_id).first()
     if existing:
         raise HTTPException(409, "Channel already exists")
@@ -95,7 +96,7 @@ def create_channel(body: ChannelCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/channels/{channel_id}")
-def update_channel(channel_id: str, body: ChannelUpdate, db: Session = Depends(get_db)):
+def update_channel(channel_id: str, body: ChannelUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     ch = db.query(CrawlChannel).filter(CrawlChannel.id == channel_id).first()
     if not ch:
         raise HTTPException(404, "Channel not found")
@@ -106,7 +107,7 @@ def update_channel(channel_id: str, body: ChannelUpdate, db: Session = Depends(g
 
 
 @router.delete("/channels/{channel_id}")
-def delete_channel(channel_id: str, db: Session = Depends(get_db)):
+def delete_channel(channel_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     ch = db.query(CrawlChannel).filter(CrawlChannel.id == channel_id).first()
     if not ch:
         raise HTTPException(404, "Channel not found")
@@ -126,7 +127,7 @@ def delete_channel(channel_id: str, db: Session = Depends(get_db)):
 # ── Crawl trigger ──────────────────────────────────────
 
 @router.post("/crawl/{channel_id}")
-def crawl_channel(channel_id: str, db: Session = Depends(get_db)):
+def crawl_channel(channel_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """특정 채널 크롤링 실행 (동기식 — MVP)."""
     ch = db.query(CrawlChannel).filter(CrawlChannel.id == channel_id).first()
     if not ch:
@@ -149,7 +150,7 @@ def crawl_channel(channel_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/crawl/all")
-def crawl_all(db: Session = Depends(get_db)):
+def crawl_all(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     """활성화된 모든 채널 크롤링."""
     channels = db.query(CrawlChannel).filter(CrawlChannel.is_active == True).all()
     results = []
@@ -165,6 +166,7 @@ def crawl_all(db: Session = Depends(get_db)):
 @router.get("/crawl/logs")
 def list_crawl_logs(
     limit: int = Query(default=50, le=200),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     logs = db.query(CrawlLog).order_by(CrawlLog.started_at.desc()).limit(limit).all()
@@ -190,6 +192,7 @@ def list_crawl_logs(
 def list_review_queue(
     status: str = Query(default="PENDING"),
     limit: int = Query(default=50, le=200),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     items = (
@@ -224,7 +227,7 @@ def list_review_queue(
 
 
 @router.post("/review/{review_id}/approve")
-def approve_review(review_id: str, body: ReviewApprove, db: Session = Depends(get_db)):
+def approve_review(review_id: str, body: ReviewApprove, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     rq = db.query(ReviewQueue).filter(ReviewQueue.id == review_id).first()
     if not rq:
         raise HTTPException(404, "Review item not found")
@@ -259,7 +262,7 @@ def approve_review(review_id: str, body: ReviewApprove, db: Session = Depends(ge
 
 
 @router.post("/review/{review_id}/reject")
-def reject_review(review_id: str, db: Session = Depends(get_db)):
+def reject_review(review_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     rq = db.query(ReviewQueue).filter(ReviewQueue.id == review_id).first()
     if not rq:
         raise HTTPException(404, "Review item not found")
@@ -267,3 +270,19 @@ def reject_review(review_id: str, db: Session = Depends(get_db)):
     rq.reviewed_at = datetime.utcnow()
     db.commit()
     return {"ok": True}
+
+
+# ── User Songs Review ─────────────────────────────────
+
+class SongSourceUpdate(BaseModel):
+    source: str  # MANUAL / CRAWLED / USER
+
+
+@router.put("/songs/{song_id}/source")
+def update_song_source(song_id: str, body: SongSourceUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    song = db.query(Song).filter(Song.id == song_id).first()
+    if not song:
+        raise HTTPException(404, "Song not found")
+    song.source = body.source
+    db.commit()
+    return {"ok": True, "source": song.source}

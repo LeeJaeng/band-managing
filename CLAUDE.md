@@ -8,7 +8,8 @@
 
 ## 핵심 가치
 
-- 인도자가 콘티를 짤 때 곡 검색~레퍼런스 확인까지 한 곳에서 해결
+- 콘티 작성이 핵심 — 곡 검색~키 설정(키업 포함)~레퍼런스 확인까지 한 곳에서 해결
+- 콘티 공유 — 텍스트 복사(카톡/밴드) 또는 링크 공유로 팀원에게 전달
 - 크롤링 봇으로 곡 데이터 자동 수집 (유튜브 기반)
 - 관리자의 모든 수동 작업은 API 기반 → 추후 자동화 전환 가능
 
@@ -25,7 +26,8 @@
 ### 설계 원칙
 - 크롤러는 API를 통해 DB에 접근 (직접 DB 접근 X)
 - 관리자 기능은 모두 REST API로 노출 (자동화 대비)
-- MVP에서는 인증 없음, 추후 회원가입 시 추가
+- JWT 인증 (아이디/비번), 역할: ADMIN / MEMBER
+- 읽기 API는 공개 (콘티 공유 링크 지원)
 
 ### 코드 컨벤션
 - API: FastAPI 라우터, SQLAlchemy ORM, Pydantic 스키마
@@ -41,7 +43,7 @@
 ### DB
 - PostgreSQL 16, 연결: 환경변수 `DATABASE_URL`
 - ORM: SQLAlchemy, 모델: `api/models.py`
-- 테이블: songs, song_references, song_sheets, contis, conti_items, crawl_channels, crawl_logs, review_queue
+- 테이블: songs, song_references, song_sheets, contis, conti_items, conti_members, crawl_channels, crawl_logs, review_queue, users, team_members
 - 마이그레이션: `api/main.py`의 `MIGRATIONS` 리스트에 ALTER TABLE 추가 (앱 시작 시 자동 실행)
 
 ### 크롤링
@@ -64,7 +66,7 @@ cd api
 DATABASE_URL=sqlite:///./test.db pytest tests/ -v
 ```
 
-52개 테스트 (songs, contis, admin, crawler)
+테스트 (songs, contis, admin, crawler, auth, team)
 
 ## 문서 참조
 

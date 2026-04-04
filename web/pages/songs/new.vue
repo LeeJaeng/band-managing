@@ -5,8 +5,24 @@ const { api } = useApi()
 const form = ref({
   title: '',
   default_key: '',
+  keys: [] as string[],
   lyrics: '',
 })
+
+// 키 목록 (자주 쓰는 키 우선)
+const COMMON_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B']
+const OTHER_MAJOR_KEYS = ['C#', 'Db', 'D#', 'Eb', 'F#', 'Gb', 'G#', 'Ab', 'A#']
+const MINOR_KEYS = ['Am', 'Bm', 'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'A#m', 'Bbm']
+const showAllKeys = ref(false)
+
+function toggleKey(key: string) {
+  const idx = form.value.keys.indexOf(key)
+  if (idx >= 0) {
+    form.value.keys.splice(idx, 1)
+  } else {
+    form.value.keys.push(key)
+  }
+}
 
 const refs = ref<Array<{ youtube_url: string; title: string; key: string }>>([
   { youtube_url: '', title: '', key: '' },
@@ -83,8 +99,42 @@ async function save() {
         <label>곡 제목 *</label>
         <input v-model="form.title" class="input" placeholder="예: 주만 바라볼찌라" />
 
-        <label>기본 키</label>
-        <input v-model="form.default_key" class="input" placeholder="예: G, Am, Bb" />
+        <label>키 (복수 선택 가능)</label>
+        <div class="key-picker">
+          <div class="key-picker-group">
+            <span class="key-group-label">자주 쓰는 키</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in COMMON_KEYS" :key="k" type="button"
+                :class="['key-chip', { selected: form.keys.includes(k) }]"
+                @click="toggleKey(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <div v-if="showAllKeys" class="key-picker-group">
+            <span class="key-group-label">기타 메이저</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in OTHER_MAJOR_KEYS" :key="k" type="button"
+                :class="['key-chip', { selected: form.keys.includes(k) }]"
+                @click="toggleKey(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <div v-if="showAllKeys" class="key-picker-group">
+            <span class="key-group-label">마이너</span>
+            <div class="key-picker-chips">
+              <button
+                v-for="k in MINOR_KEYS" :key="k" type="button"
+                :class="['key-chip', { selected: form.keys.includes(k) }]"
+                @click="toggleKey(k)"
+              >{{ k }}</button>
+            </div>
+          </div>
+          <button type="button" class="key-more-btn" @click="showAllKeys = !showAllKeys">
+            {{ showAllKeys ? '접기' : '더보기 (기타 키)' }}
+          </button>
+        </div>
 
         <label>가사</label>
         <textarea v-model="form.lyrics" class="textarea" rows="6" placeholder="가사를 입력하세요..." />
@@ -200,6 +250,60 @@ h1 { font-size: 24px; font-weight: 800; margin-bottom: 20px; }
   font-weight: 700;
   cursor: pointer;
   &:hover { background: var(--accent-soft); }
+}
+
+.key-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.key-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.key-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.key-chip {
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  &:hover:not(.selected) { background: rgba(255,255,255,0.05); }
+}
+
+.key-more-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+  &:hover { color: var(--accent); }
 }
 
 .btn-remove {

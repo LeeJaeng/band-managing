@@ -24,6 +24,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg://band:bandpass@db:5432/banddb
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
     depends_on:
       - db
     restart: unless-stopped

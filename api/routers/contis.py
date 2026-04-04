@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 
 from db import get_db
-from models import Conti, ContiItem, Song, SongReference
+from models import Conti, ContiItem, ContiMember, Song, SongReference, TeamMember, User
+from auth import get_current_user
 
 router = APIRouter(prefix="/api/contis", tags=["contis"])
 
@@ -51,6 +52,11 @@ class ReorderBody(BaseModel):
     items: list[ReorderItem]
 
 
+class ContiMemberCreate(BaseModel):
+    member_id: str
+    position: str
+
+
 # ── helpers ────────────────────────────────────────────
 
 def _serialize_item(item: ContiItem) -> dict:
@@ -67,6 +73,7 @@ def _serialize_item(item: ContiItem) -> dict:
             "title": song.title,
             "artist": song.artist,
             "default_key": song.default_key,
+            "keys": song.keys,
         } if song else None,
         "reference": {
             "id": ref.id,
@@ -110,6 +117,7 @@ def get_conti(conti_id: str, db: Session = Depends(get_db)):
         .options(
             joinedload(Conti.items).joinedload(ContiItem.song),
             joinedload(Conti.items).joinedload(ContiItem.reference),
+            joinedload(Conti.members).joinedload(ContiMember.member),
         )
         .filter(Conti.id == conti_id)
         .first()
@@ -124,11 +132,20 @@ def get_conti(conti_id: str, db: Session = Depends(get_db)):
         "status": conti.status,
         "created_at": conti.created_at.isoformat() if conti.created_at else None,
         "items": [_serialize_item(item) for item in conti.items],
+        "members": [
+            {
+                "id": cm.id,
+                "member_id": cm.member.id,
+                "name": cm.member.name,
+                "position": cm.position,
+            }
+            for cm in conti.members
+        ],
     }
 
 
 @router.post("", status_code=201)
-def create_conti(body: ContiCreate, db: Session = Depends(get_db)):
+def create_conti(body: ContiCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = Conti(date=body.date, service_name=body.service_name, author=body.author)
     db.add(conti)
     db.commit()
@@ -137,7 +154,7 @@ def create_conti(body: ContiCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{conti_id}")
-def update_conti(conti_id: str, body: ContiUpdate, db: Session = Depends(get_db)):
+def update_conti(conti_id: str, body: ContiUpdate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = db.query(Conti).filter(Conti.id == conti_id).first()
     if not conti:
         raise HTTPException(404, "Conti not found")
@@ -149,7 +166,7 @@ def update_conti(conti_id: str, body: ContiUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{conti_id}")
-def delete_conti(conti_id: str, db: Session = Depends(get_db)):
+def delete_conti(conti_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = db.query(Conti).filter(Conti.id == conti_id).first()
     if not conti:
         raise HTTPException(404, "Conti not found")
@@ -159,7 +176,7 @@ def delete_conti(conti_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{conti_id}/confirm")
-def confirm_conti(conti_id: str, db: Session = Depends(get_db)):
+def confirm_conti(conti_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = db.query(Conti).filter(Conti.id == conti_id).first()
     if not conti:
         raise HTTPException(404, "Conti not found")
@@ -171,7 +188,7 @@ def confirm_conti(conti_id: str, db: Session = Depends(get_db)):
 # ── Conti Items ────────────────────────────────────────
 
 @router.post("/{conti_id}/items", status_code=201)
-def add_item(conti_id: str, body: ItemCreate, db: Session = Depends(get_db)):
+def add_item(conti_id: str, body: ItemCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = db.query(Conti).filter(Conti.id == conti_id).first()
     if not conti:
         raise HTTPException(404, "Conti not found")
@@ -186,18 +203,18 @@ def add_item(conti_id: str, body: ItemCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/items/{item_id}")
-def update_item(item_id: str, body: ItemUpdate, db: Session = Depends(get_db)):
+def update_item(item_id: str, body: ItemUpdate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = db.query(ContiItem).filter(ContiItem.id == item_id).first()
     if not item:
         raise HTTPException(404, "Item not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     db.commit()
     return {"ok": True}
 
 
 @router.delete("/items/{item_id}")
-def delete_item(item_id: str, db: Session = Depends(get_db)):
+def delete_item(item_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = db.query(ContiItem).filter(ContiItem.id == item_id).first()
     if not item:
         raise HTTPException(404, "Item not found")
@@ -207,7 +224,7 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{conti_id}/reorder")
-def reorder_items(conti_id: str, body: ReorderBody, db: Session = Depends(get_db)):
+def reorder_items(conti_id: str, body: ReorderBody, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conti = db.query(Conti).filter(Conti.id == conti_id).first()
     if not conti:
         raise HTTPException(404, "Conti not found")
@@ -215,5 +232,32 @@ def reorder_items(conti_id: str, body: ReorderBody, db: Session = Depends(get_db
         item = db.query(ContiItem).filter(ContiItem.id == entry.id, ContiItem.conti_id == conti_id).first()
         if item:
             item.order_num = entry.order_num
+    db.commit()
+    return {"ok": True}
+
+
+# ── Conti Members ─────────────────────────────────────
+
+@router.post("/{conti_id}/members", status_code=201)
+def add_conti_member(conti_id: str, body: ContiMemberCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    conti = db.query(Conti).filter(Conti.id == conti_id).first()
+    if not conti:
+        raise HTTPException(404, "Conti not found")
+    member = db.query(TeamMember).filter(TeamMember.id == body.member_id).first()
+    if not member:
+        raise HTTPException(404, "Member not found")
+    cm = ContiMember(conti_id=conti_id, member_id=body.member_id, position=body.position)
+    db.add(cm)
+    db.commit()
+    db.refresh(cm)
+    return {"id": cm.id, "name": member.name, "position": cm.position}
+
+
+@router.delete("/{conti_id}/members/{conti_member_id}")
+def remove_conti_member(conti_id: str, conti_member_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cm = db.query(ContiMember).filter(ContiMember.id == conti_member_id, ContiMember.conti_id == conti_id).first()
+    if not cm:
+        raise HTTPException(404, "Conti member not found")
+    db.delete(cm)
     db.commit()
     return {"ok": True}
