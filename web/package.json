@@ -1,0 +1,21 @@
+{
+  "name": "band-managing-web",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "vue": "^3.5.26",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "nuxt": "^3.20.2",
+    "sass": "^1.97.2"
+  },
+  "packageManager": "pnpm@10.28.0"
+}

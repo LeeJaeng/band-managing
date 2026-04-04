@@ -1,0 +1,43 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: band-managing-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - web
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: band-managing-web
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: band-managing-api
+    environment:
+      - DATABASE_URL=postgresql+psycopg://band:bandpass@db:5432/banddb
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: band-managing-db
+    environment:
+      - POSTGRES_USER=band
+      - POSTGRES_PASSWORD=bandpass
+      - POSTGRES_DB=banddb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
