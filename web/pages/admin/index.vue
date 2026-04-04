@@ -213,9 +213,11 @@ onMounted(load)
           <label>유튜브 채널 URL</label>
           <div class="url-row">
             <input v-model="channelForm.youtube_channel_url" class="input" placeholder="https://youtube.com/@MarkersWorship" />
-            <button class="btn" :disabled="resolving" @click="resolveFromUrl">
-              {{ resolving ? '확인 중...' : '자동입력' }}
-            </button>
+            <div class="url-actions">
+              <button class="btn" :disabled="resolving" @click="resolveFromUrl">
+                {{ resolving ? '확인 중...' : '자동입력' }}
+              </button>
+            </div>
           </div>
 
           <label>사역팀 이름</label>
@@ -349,8 +351,9 @@ label {
 
 .url-row {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  .input { flex: 1; }
+  .url-actions { display: flex; justify-content: flex-end; }
 }
 
 .form-actions { display: flex; gap: 8px; margin-top: 8px; }
