@@ -31,6 +31,16 @@ STRIP_PATTERNS = [
 # 키 감지 패턴
 KEY_PATTERN = re.compile(r"keys?\s*[:\-]?\s*([A-G][#b]?m?)", re.IGNORECASE)
 
+# 긴 영상 제외 키워드 (예배 실황 등)
+SKIP_KEYWORDS = [
+    "예배 실황", "예배실황", "full worship", "전체 예배",
+    "sunday service", "주일예배", "주일 예배",
+    "예배 영상", "worship service",
+]
+
+# 최대 영상 길이 (초) — 15분 초과 영상 무시
+MAX_DURATION_SECONDS = 900
+
 
 def parse_song_title(video_title: str) -> str:
     """영상 제목에서 곡 제목을 추출."""
@@ -47,6 +57,26 @@ def detect_key(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def should_skip_video(title: str) -> bool:
+    """예배 실황 등 스킵해야 할 영상인지 확인."""
+    lower = title.lower()
+    for kw in SKIP_KEYWORDS:
+        if kw.lower() in lower:
+            return True
+    return False
+
+
+def _parse_duration(duration_str: str) -> int:
+    """ISO 8601 duration (PT1H2M3S) → 초 변환."""
+    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration_str)
+    if not match:
+        return 0
+    h = int(match.group(1) or 0)
+    m = int(match.group(2) or 0)
+    s = int(match.group(3) or 0)
+    return h * 3600 + m * 60 + s
+
+
 def find_matching_song(parsed_title: str, db: Session) -> Song | None:
     """DB에서 제목이 유사한 곡을 찾기 (정확 매칭 우선)."""
     exact = db.query(Song).filter(Song.title == parsed_title).first()
@@ -56,7 +86,35 @@ def find_matching_song(parsed_title: str, db: Session) -> Song | None:
     return like
 
 
-def _fetch_channel_videos(channel_id: str) -> list[dict]:
+def _resolve_channel_id(youtube, channel_id_or_handle: str) -> str:
+    """@handle이나 커스텀 URL을 실제 채널 ID (UC...)로 변환."""
+    if channel_id_or_handle.startswith("UC"):
+        return channel_id_or_handle
+
+    # @handle인 경우
+    handle = channel_id_or_handle.lstrip("@")
+    resp = youtube.channels().list(
+        part="id",
+        forHandle=handle,
+    ).execute()
+
+    items = resp.get("items", [])
+    if items:
+        return items[0]["id"]
+
+    # forUsername으로도 시도
+    resp = youtube.channels().list(
+        part="id",
+        forUsername=handle,
+    ).execute()
+    items = resp.get("items", [])
+    if items:
+        return items[0]["id"]
+
+    raise ValueError(f"채널을 찾을 수 없습니다: {channel_id_or_handle}")
+
+
+def _fetch_channel_videos(channel_id_or_handle: str) -> list[dict]:
     """YouTube Data API로 채널의 영상 목록을 가져온다."""
     if not YOUTUBE_API_KEY:
         return []
@@ -65,12 +123,16 @@ def _fetch_channel_videos(channel_id: str) -> list[dict]:
 
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-    videos = []
+    # @handle → UC... 변환
+    resolved_id = _resolve_channel_id(youtube, channel_id_or_handle)
+
+    # 1단계: search로 영상 ID 목록 수집
+    video_ids = []
     next_page = None
 
     for _ in range(5):  # 최대 5페이지 (250개)
         req = youtube.search().list(
-            channelId=channel_id,
+            channelId=resolved_id,
             part="snippet",
             type="video",
             order="date",
@@ -80,18 +142,46 @@ def _fetch_channel_videos(channel_id: str) -> list[dict]:
         resp = req.execute()
 
         for item in resp.get("items", []):
-            snippet = item["snippet"]
-            videos.append({
-                "video_id": item["id"]["videoId"],
-                "title": snippet["title"],
-                "description": snippet.get("description", ""),
-                "thumbnail": snippet["thumbnails"].get("high", {}).get("url", ""),
-                "published_at": snippet["publishedAt"],
-            })
+            video_ids.append(item["id"]["videoId"])
 
         next_page = resp.get("nextPageToken")
         if not next_page:
             break
+
+    if not video_ids:
+        return []
+
+    # 2단계: videos로 duration 정보 가져오기 (50개씩 배치)
+    videos = []
+    for i in range(0, len(video_ids), 50):
+        batch = video_ids[i:i+50]
+        detail_resp = youtube.videos().list(
+            part="snippet,contentDetails",
+            id=",".join(batch),
+        ).execute()
+
+        for item in detail_resp.get("items", []):
+            duration = _parse_duration(item["contentDetails"]["duration"])
+
+            # 15분 초과 영상 무시
+            if duration > MAX_DURATION_SECONDS:
+                continue
+
+            snippet = item["snippet"]
+            title = snippet["title"]
+
+            # 예배 실황 키워드 무시
+            if should_skip_video(title):
+                continue
+
+            videos.append({
+                "video_id": item["id"],
+                "title": title,
+                "description": snippet.get("description", ""),
+                "thumbnail": snippet["thumbnails"].get("high", {}).get("url", ""),
+                "published_at": snippet["publishedAt"],
+                "duration": duration,
+            })
 
     return videos
 
@@ -132,7 +222,6 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
             matching_song = find_matching_song(parsed_title, db)
 
             if matching_song:
-                # 확실한 매칭 → 레퍼런스 추가
                 ref = SongReference(
                     song_id=matching_song.id,
                     channel_id=channel.id,
@@ -147,7 +236,6 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
                 db.add(ref)
                 refs_added += 1
             else:
-                # 불확실 → 검증 큐
                 rq = ReviewQueue(
                     youtube_video_id=video["video_id"],
                     youtube_url=f"https://www.youtube.com/watch?v={video['video_id']}",

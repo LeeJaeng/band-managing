@@ -78,6 +78,14 @@ def delete_channel(channel_id: str, db: Session = Depends(get_db)):
     ch = db.query(CrawlChannel).filter(CrawlChannel.id == channel_id).first()
     if not ch:
         raise HTTPException(404, "Channel not found")
+    # 관련 로그/검증큐 삭제
+    db.query(CrawlLog).filter(CrawlLog.channel_id == channel_id).delete()
+    db.query(ReviewQueue).filter(ReviewQueue.channel_id == channel_id).delete()
+    # 레퍼런스의 channel_id를 null로 변경 (곡 데이터는 유지)
+    from models import SongReference
+    db.query(SongReference).filter(SongReference.channel_id == channel_id).update(
+        {"channel_id": None}, synchronize_session="fetch"
+    )
     db.delete(ch)
     db.commit()
     return {"ok": True}

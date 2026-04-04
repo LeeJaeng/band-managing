@@ -33,21 +33,29 @@ async function addChannel() {
 }
 
 async function toggleChannel(ch: any) {
-  await api(`/api/admin/channels/${ch.id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ is_active: !ch.is_active }),
-  })
+  try {
+    await api(`/api/admin/channels/${ch.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_active: !ch.is_active }),
+    })
+  } catch (e: any) { alert(e.message || '수정 실패') }
   await load()
 }
 
 async function deleteChannel(ch: any) {
-  await api(`/api/admin/channels/${ch.id}`, { method: 'DELETE' })
+  if (!confirm(`"${ch.name}" 채널을 삭제하시겠습니까?`)) return
+  try {
+    await api(`/api/admin/channels/${ch.id}`, { method: 'DELETE' })
+  } catch (e: any) { alert(e.message || '삭제 실패') }
   await load()
 }
 
 async function crawlChannel(channelId: string) {
   crawling.value = true
-  await api(`/api/admin/crawl/${channelId}`, { method: 'POST' })
+  try {
+    const result = await api<any>(`/api/admin/crawl/${channelId}`, { method: 'POST' })
+    if (result.error) alert(`크롤링 실패: ${result.error}`)
+  } catch (e: any) { alert(e.message || '크롤링 실패') }
   crawling.value = false
   await load()
 }
@@ -96,9 +104,9 @@ onMounted(load)
 
         <!-- 채널 추가 폼 -->
         <div v-if="showAddChannel" class="add-form">
-          <input v-model="newChannel.name" class="input" placeholder="사역팀 이름" />
-          <input v-model="newChannel.youtube_channel_url" class="input" placeholder="유튜브 채널 URL" />
-          <input v-model="newChannel.youtube_channel_id" class="input" placeholder="유튜브 채널 ID" />
+          <input v-model="newChannel.name" class="input" placeholder="사역팀 이름 (예: 마커스워십)" />
+          <input v-model="newChannel.youtube_channel_url" class="input" placeholder="유튜브 채널 URL (예: https://youtube.com/@MarkersWorship)" />
+          <input v-model="newChannel.youtube_channel_id" class="input" placeholder="채널 ID (@MarkersWorship 또는 UC...)" />
           <select v-model="newChannel.trust_level" class="input">
             <option value="HIGH">HIGH</option>
             <option value="MEDIUM">MEDIUM</option>
