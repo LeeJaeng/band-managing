@@ -51,7 +51,7 @@ def list_channels(db: Session = Depends(get_db)):
     ]
 
 
-@router.post("/channels/resolve-id")
+@router.get("/channels/resolve-id")
 def resolve_channel_id(youtube_channel_id: str = Query(...)):
     """@handle이나 UC...를 실제 채널 ID로 변환."""
     import os
