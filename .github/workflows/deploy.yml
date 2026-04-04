@@ -37,7 +37,10 @@ jobs:
             echo "YOUTUBE_API_KEY=${YOUTUBE_API_KEY}" > .env
 
             echo "== rebuilding containers =="
-            docker compose up -d --build
+            docker compose up -d --build --force-recreate
+
+            echo "== reloading nginx =="
+            docker compose exec -T nginx nginx -s reload || true
 
             echo "== compose status =="
             docker compose ps
