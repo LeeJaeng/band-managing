@@ -63,7 +63,10 @@ def list_songs(
         like = f"%{q}%"
         query = query.filter(or_(Song.title.ilike(like), Song.lyrics.ilike(like)))
     total = query.count()
-    songs = query.order_by(Song.title).offset(offset).limit(limit).all()
+    songs = (
+        query.options(joinedload(Song.references))
+        .order_by(Song.title).offset(offset).limit(limit).all()
+    )
     return {
         "total": total,
         "items": [
@@ -72,6 +75,7 @@ def list_songs(
                 "title": s.title,
                 "artist": s.artist,
                 "default_key": s.default_key,
+                "ref_count": len(s.references),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in songs
@@ -150,6 +154,13 @@ def delete_song(song_id: str, db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
+    # conti_items에서 참조 제거
+    from models import ContiItem, ReviewQueue
+    db.query(ContiItem).filter(ContiItem.song_id == song_id).delete()
+    # review_queue에서 참조 제거
+    db.query(ReviewQueue).filter(ReviewQueue.suggested_song_id == song_id).update(
+        {"suggested_song_id": None}, synchronize_session="fetch"
+    )
     db.delete(song)
     db.commit()
     return {"ok": True}

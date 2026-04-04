@@ -15,10 +15,11 @@ const resolving = ref(false)
 
 async function load() {
   loading.value = true
+  const t = Date.now()
   const [ch, lg, rq] = await Promise.all([
-    api<any[]>('/api/admin/channels'),
-    api<any[]>('/api/admin/crawl/logs?limit=10'),
-    api<any[]>('/api/admin/review-queue?status=PENDING'),
+    api<any[]>(`/api/admin/channels?_t=${t}`),
+    api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`),
+    api<any[]>(`/api/admin/review-queue?status=PENDING&_t=${t}`),
   ])
   channels.value = ch
   logs.value = lg
