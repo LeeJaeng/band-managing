@@ -132,9 +132,20 @@ def crawl_channel(channel_id: str, db: Session = Depends(get_db)):
     if not ch:
         raise HTTPException(404, "Channel not found")
 
-    from crawler import crawl_channel as do_crawl
-    result = do_crawl(ch, db)
-    return result
+    try:
+        from crawler import crawl_channel as do_crawl
+        result = do_crawl(ch, db)
+        return result
+    except Exception as e:
+        db.rollback()
+        return {
+            "channel_id": ch.id,
+            "channel_name": ch.name,
+            "status": "FAILED",
+            "error": str(e),
+            "videos_found": 0,
+            "refs_added": 0,
+        }
 
 
 @router.post("/crawl/all")

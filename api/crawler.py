@@ -281,10 +281,19 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
         }
 
     except Exception as e:
-        log.status = "FAILED"
-        log.error_message = str(e)
-        log.finished_at = datetime.utcnow()
-        db.commit()
+        try:
+            db.rollback()
+            fail_log = CrawlLog(
+                channel_id=channel.id,
+                status="FAILED",
+                error_message=str(e),
+                started_at=datetime.utcnow(),
+                finished_at=datetime.utcnow(),
+            )
+            db.add(fail_log)
+            db.commit()
+        except Exception:
+            db.rollback()
         return {
             "channel_id": channel.id,
             "channel_name": channel.name,
