@@ -36,10 +36,23 @@ SKIP_KEYWORDS = [
     "예배 실황", "예배실황", "full worship", "전체 예배",
     "sunday service", "주일예배", "주일 예배",
     "예배 영상", "worship service",
+    "설교", "sermon", "말씀",
 ]
 
-# 최대 영상 길이 (초) — 15분 초과 영상 무시
-MAX_DURATION_SECONDS = 900
+# 제외할 영상 키워드 (연주/인스트/MR 등)
+SKIP_TYPE_KEYWORDS = [
+    "inst", "instrumental", "연주", "mr", "반주",
+    "ar", "accompaniment", "karaoke", "노래방",
+    "drum cam", "드럼캠", "bass cam", "베이스캠",
+    "guitar cam", "기타캠",
+    "making", "메이킹", "behind", "비하인드",
+    "interview", "인터뷰",
+    "teaser", "trailer", "예고",
+    "shorts",
+]
+
+# 최대 영상 길이 (초) — 20분 초과 영상 무시
+MAX_DURATION_SECONDS = 1200
 
 
 def parse_song_title(video_title: str) -> str:
@@ -58,9 +71,12 @@ def detect_key(text: str) -> str | None:
 
 
 def should_skip_video(title: str) -> bool:
-    """예배 실황 등 스킵해야 할 영상인지 확인."""
+    """예배 실황, 연주, inst 등 스킵해야 할 영상인지 확인."""
     lower = title.lower()
     for kw in SKIP_KEYWORDS:
+        if kw.lower() in lower:
+            return True
+    for kw in SKIP_TYPE_KEYWORDS:
         if kw.lower() in lower:
             return True
     return False
@@ -258,7 +274,9 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
             "channel_name": channel.name,
             "status": "SUCCESS",
             "videos_found": log.videos_found,
+            "songs_added": songs_added,
             "refs_added": refs_added,
+            "review_queue_added": log.videos_found - refs_added - songs_added,
         }
 
     except Exception as e:
