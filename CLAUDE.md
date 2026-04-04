@@ -42,11 +42,14 @@
 - PostgreSQL 16, 연결: 환경변수 `DATABASE_URL`
 - ORM: SQLAlchemy, 모델: `api/models.py`
 - 테이블: songs, song_references, song_sheets, contis, conti_items, crawl_channels, crawl_logs, review_queue
+- 마이그레이션: `api/main.py`의 `MIGRATIONS` 리스트에 ALTER TABLE 추가 (앱 시작 시 자동 실행)
 
 ### 크롤링
 - YouTube Data API v3 (playlistItems + videos)
 - 채널 업로드 재생목록(UU...)에서 영상 수집
-- 20분 초과 영상 무시, 예배실황/연주/inst/MR 등 필터링
+- 10분 초과 영상 무시, 예배실황/연주/inst/MR 등 필터링
+- 곡 합쳐진 영상 필터 (+, &, 메들리, 모음, worship set)
+- 곡 제목에서 사역팀 이름 자동 제거
 - @handle → UC... 채널 ID 자동 변환
 - 곡 매칭: 제목 유사도 → 매칭되면 레퍼런스 추가, 안 되면 검증 큐
 
@@ -61,7 +64,7 @@ cd api
 DATABASE_URL=sqlite:///./test.db pytest tests/ -v
 ```
 
-45개 테스트 (songs, contis, admin, crawler)
+52개 테스트 (songs, contis, admin, crawler)
 
 ## 문서 참조
 
