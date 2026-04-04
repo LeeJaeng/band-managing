@@ -12,11 +12,14 @@ jobs:
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         with:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           port: ${{ secrets.LIGHTSAIL_PORT }}
+          envs: YOUTUBE_API_KEY
           script: |
             set -e
             cd /home/ubuntu/band-managing
@@ -29,6 +32,9 @@ jobs:
 
             echo "== deployed commit =="
             git rev-parse HEAD
+
+            echo "== writing .env =="
+            echo "YOUTUBE_API_KEY=${YOUTUBE_API_KEY}" > .env
 
             echo "== rebuilding containers =="
             docker compose up -d --build
