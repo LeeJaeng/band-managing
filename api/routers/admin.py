@@ -51,6 +51,37 @@ def list_channels(db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/channels/resolve-id")
+def resolve_channel_id(youtube_channel_id: str = Query(...)):
+    """@handle이나 UC...를 실제 채널 ID로 변환."""
+    import os
+    api_key = os.getenv("YOUTUBE_API_KEY", "")
+    if not api_key:
+        raise HTTPException(500, "YouTube API 키가 설정되지 않았습니다")
+
+    from googleapiclient.discovery import build
+    youtube = build("youtube", "v3", developerKey=api_key)
+
+    channel_id = youtube_channel_id.strip().lstrip("@")
+
+    if channel_id.startswith("UC"):
+        return {"channel_id": channel_id}
+
+    # forHandle로 시도
+    resp = youtube.channels().list(part="id,snippet", forHandle=channel_id).execute()
+    items = resp.get("items", [])
+    if items:
+        return {"channel_id": items[0]["id"], "name": items[0]["snippet"]["title"]}
+
+    # forUsername으로 시도
+    resp = youtube.channels().list(part="id,snippet", forUsername=channel_id).execute()
+    items = resp.get("items", [])
+    if items:
+        return {"channel_id": items[0]["id"], "name": items[0]["snippet"]["title"]}
+
+    raise HTTPException(404, f"채널을 찾을 수 없습니다: {youtube_channel_id}")
+
+
 @router.post("/channels", status_code=201)
 def create_channel(body: ChannelCreate, db: Session = Depends(get_db)):
     existing = db.query(CrawlChannel).filter(CrawlChannel.youtube_channel_id == body.youtube_channel_id).first()
