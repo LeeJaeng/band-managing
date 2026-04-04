@@ -22,6 +22,7 @@ class ChannelCreate(BaseModel):
 class ChannelUpdate(BaseModel):
     name: str | None = None
     youtube_channel_url: str | None = None
+    youtube_channel_id: str | None = None
     trust_level: str | None = None
     is_active: bool | None = None
 

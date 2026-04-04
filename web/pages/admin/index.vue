@@ -7,9 +7,10 @@ const reviewQueue = ref<any[]>([])
 const loading = ref(true)
 const crawling = ref(false)
 
-// 채널 등록 폼
-const newChannel = ref({ name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' })
-const showAddChannel = ref(false)
+// 채널 등록/편집 폼
+const channelForm = ref({ name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' })
+const showChannelForm = ref(false)
+const editingChannelId = ref<string | null>(null)
 
 async function load() {
   loading.value = true
@@ -24,12 +25,53 @@ async function load() {
   loading.value = false
 }
 
-async function addChannel() {
-  if (!newChannel.value.name || !newChannel.value.youtube_channel_id) return
-  await api('/api/admin/channels', { method: 'POST', body: JSON.stringify(newChannel.value) })
-  newChannel.value = { name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' }
-  showAddChannel.value = false
-  await load()
+function openAddForm() {
+  editingChannelId.value = null
+  channelForm.value = { name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' }
+  showChannelForm.value = true
+}
+
+function openEditForm(ch: any) {
+  editingChannelId.value = ch.id
+  channelForm.value = {
+    name: ch.name,
+    youtube_channel_url: ch.youtube_channel_url,
+    youtube_channel_id: ch.youtube_channel_id,
+    trust_level: ch.trust_level,
+  }
+  showChannelForm.value = true
+}
+
+function closeForm() {
+  showChannelForm.value = false
+  editingChannelId.value = null
+}
+
+async function saveChannel() {
+  if (!channelForm.value.name || !channelForm.value.youtube_channel_id) {
+    alert('이름과 채널 ID는 필수입니다.')
+    return
+  }
+
+  try {
+    if (editingChannelId.value) {
+      // 수정
+      await api(`/api/admin/channels/${editingChannelId.value}`, {
+        method: 'PUT',
+        body: JSON.stringify(channelForm.value),
+      })
+    } else {
+      // 등록
+      await api('/api/admin/channels', {
+        method: 'POST',
+        body: JSON.stringify(channelForm.value),
+      })
+    }
+    closeForm()
+    await load()
+  } catch (e: any) {
+    alert(e.message || '저장 실패')
+  }
 }
 
 async function toggleChannel(ch: any) {
@@ -80,15 +122,19 @@ async function crawlAll() {
 }
 
 async function approveReview(rq: any) {
-  await api(`/api/admin/review/${rq.id}/approve`, {
-    method: 'POST',
-    body: JSON.stringify({ song_title: rq.parsed_song_title }),
-  })
+  try {
+    await api(`/api/admin/review/${rq.id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ song_title: rq.parsed_song_title }),
+    })
+  } catch (e: any) { alert(e.message || '승인 실패') }
   await load()
 }
 
 async function rejectReview(rq: any) {
-  await api(`/api/admin/review/${rq.id}/reject`, { method: 'POST' })
+  try {
+    await api(`/api/admin/review/${rq.id}/reject`, { method: 'POST' })
+  } catch (e: any) { alert(e.message || '거부 실패') }
   await load()
 }
 
@@ -107,24 +153,28 @@ onMounted(load)
         <div class="section-header">
           <h2>크롤링 채널 ({{ channels.length }})</h2>
           <div class="section-actions">
-            <button class="btn" @click="showAddChannel = !showAddChannel">채널 추가</button>
+            <button class="btn" @click="openAddForm">채널 추가</button>
             <button class="btn-accent" :disabled="crawling" @click="crawlAll">
               {{ crawling ? '크롤링 중...' : '전체 크롤링' }}
             </button>
           </div>
         </div>
 
-        <!-- 채널 추가 폼 -->
-        <div v-if="showAddChannel" class="add-form">
-          <input v-model="newChannel.name" class="input" placeholder="사역팀 이름 (예: 마커스워십)" />
-          <input v-model="newChannel.youtube_channel_url" class="input" placeholder="유튜브 채널 URL (예: https://youtube.com/@MarkersWorship)" />
-          <input v-model="newChannel.youtube_channel_id" class="input" placeholder="채널 ID (@MarkersWorship 또는 UC...)" />
-          <select v-model="newChannel.trust_level" class="input">
+        <!-- 채널 추가/편집 폼 -->
+        <div v-if="showChannelForm" class="add-form">
+          <h3>{{ editingChannelId ? '채널 수정' : '채널 추가' }}</h3>
+          <input v-model="channelForm.name" class="input" placeholder="사역팀 이름 (예: 마커스워십)" />
+          <input v-model="channelForm.youtube_channel_url" class="input" placeholder="유튜브 채널 URL (예: https://youtube.com/@MarkersWorship)" />
+          <input v-model="channelForm.youtube_channel_id" class="input" placeholder="채널 ID (@MarkersWorship 또는 UC...)" />
+          <select v-model="channelForm.trust_level" class="input">
             <option value="HIGH">HIGH</option>
             <option value="MEDIUM">MEDIUM</option>
             <option value="LOW">LOW</option>
           </select>
-          <button class="btn-accent" @click="addChannel">등록</button>
+          <div class="form-actions">
+            <button class="btn-accent" @click="saveChannel">{{ editingChannelId ? '수정' : '등록' }}</button>
+            <button class="btn" @click="closeForm">취소</button>
+          </div>
         </div>
 
         <div class="channel-list">
@@ -137,10 +187,12 @@ onMounted(load)
               </span>
             </div>
             <div class="ch-meta">
-              <span v-if="ch.last_crawled_at">마지막: {{ ch.last_crawled_at }}</span>
+              <span>ID: {{ ch.youtube_channel_id }}</span>
+              <span v-if="ch.last_crawled_at"> · 마지막: {{ ch.last_crawled_at }}</span>
             </div>
             <div class="ch-actions">
               <button class="btn-sm" @click="crawlChannel(ch.id)" :disabled="crawling">크롤링</button>
+              <button class="btn-sm" @click="openEditForm(ch)">수정</button>
               <button class="btn-sm" @click="toggleChannel(ch)">
                 {{ ch.is_active ? '비활성화' : '활성화' }}
               </button>
@@ -175,7 +227,9 @@ onMounted(load)
           <span>영상 {{ log.videos_found }}개</span>
           <span>레퍼런스 +{{ log.refs_added }}</span>
           <span class="log-time">{{ log.started_at }}</span>
-          <span v-if="log.error_message" class="log-error">{{ log.error_message }}</span>
+        </div>
+        <div v-for="log in logs.filter(l => l.error_message)" :key="'err-'+log.id" class="log-error-detail">
+          {{ log.error_message }}
         </div>
       </section>
     </template>
@@ -187,28 +241,26 @@ onMounted(load)
 
 h1 { font-size: 24px; font-weight: 800; margin-bottom: 24px; }
 h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 
 .btn { @include btn; }
 .btn-accent { @include btn-accent; }
 .input { @include input; }
 
-.section {
-  margin-bottom: 32px;
-}
+.section { margin-bottom: 32px; }
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
 
   h2 { margin: 0; }
 }
 
-.section-actions {
-  display: flex;
-  gap: 8px;
-}
+.section-actions { display: flex; gap: 8px; }
 
 .add-form {
   @include card;
@@ -218,6 +270,8 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
   gap: 8px;
   margin-bottom: 16px;
 }
+
+.form-actions { display: flex; gap: 8px; }
 
 .channel-list {
   display: flex;
@@ -234,7 +288,8 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .ch-name { font-weight: 600; }
@@ -252,11 +307,17 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
 .active { color: var(--green); font-size: 12px; }
 .inactive { color: var(--red); font-size: 12px; }
 
-.ch-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.ch-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  word-break: break-all;
+}
 
 .ch-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .btn-sm {
@@ -280,13 +341,13 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 12px;
 }
 
-.rv-info { flex: 1; }
-.rv-title { font-weight: 600; margin-bottom: 4px; }
+.rv-info { flex: 1; min-width: 0; }
+.rv-title { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
 .rv-parsed { font-size: 13px; color: var(--text-dim); }
-
-.rv-actions { display: flex; gap: 6px; }
+.rv-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .log-card {
   @include card;
@@ -296,6 +357,7 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
   align-items: center;
   margin-bottom: 6px;
   font-size: 13px;
+  flex-wrap: wrap;
 }
 
 .log-status {
@@ -309,11 +371,25 @@ h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
 }
 
 .log-time { color: var(--text-dim); }
-.log-error { color: var(--red); }
+
+.log-error-detail {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--red);
+  background: var(--red-soft);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  word-break: break-all;
+}
 
 .loading, .empty {
   text-align: center;
   padding: 20px;
   color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .section-header { flex-direction: column; align-items: flex-start; }
+  .review-card { flex-direction: column; align-items: flex-start; }
 }
 </style>
