@@ -39,6 +39,20 @@ jobs:
             echo "== rebuilding containers =="
             docker compose up -d --build --force-recreate
 
+            echo "== db migration =="
+            docker compose exec -T api python -c "
+from db import engine
+from sqlalchemy import text
+with engine.connect() as conn:
+    try:
+        conn.execute(text('ALTER TABLE songs ADD COLUMN keys JSON'))
+        conn.commit()
+        print('added keys column')
+    except Exception as e:
+        conn.rollback()
+        print(f'keys column already exists or error: {e}')
+" || true
+
             echo "== reloading nginx =="
             docker compose exec -T nginx nginx -s reload || true
 
