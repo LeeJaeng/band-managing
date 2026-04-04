@@ -15,6 +15,7 @@ class SongCreate(BaseModel):
     title: str
     artist: str | None = None
     default_key: str | None = None
+    keys: list[str] | None = None
     lyrics: str | None = None
 
 
@@ -22,6 +23,7 @@ class SongUpdate(BaseModel):
     title: str | None = None
     artist: str | None = None
     default_key: str | None = None
+    keys: list[str] | None = None
     lyrics: str | None = None
 
 
@@ -98,6 +100,7 @@ def get_song(song_id: str, db: Session = Depends(get_db)):
         "title": song.title,
         "artist": song.artist,
         "default_key": song.default_key,
+        "keys": song.keys or [],
         "lyrics": song.lyrics,
         "created_at": song.created_at.isoformat() if song.created_at else None,
         "updated_at": song.updated_at.isoformat() if song.updated_at else None,

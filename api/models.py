@@ -24,6 +24,7 @@ class Song(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     artist: Mapped[str | None] = mapped_column(String(200), nullable=True)
     default_key: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    keys: Mapped[list | None] = mapped_column(JSON, nullable=True)  # ["A", "Bb", "G"]
     lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
