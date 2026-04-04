@@ -142,23 +142,24 @@ def _fetch_channel_videos(channel_id_or_handle: str) -> list[dict]:
     # @handle → UC... 변환
     resolved_id = _resolve_channel_id(youtube, channel_id_or_handle)
 
-    # 1단계: search로 영상 ID 목록 수집
+    # 업로드 재생목록 ID: UC... → UU...
+    uploads_playlist_id = "UU" + resolved_id[2:]
+
+    # 1단계: playlistItems로 영상 ID 목록 수집
     video_ids = []
     next_page = None
 
     for _ in range(5):  # 최대 5페이지 (250개)
-        req = youtube.search().list(
-            channelId=resolved_id,
-            part="snippet",
-            type="video",
-            order="date",
+        req = youtube.playlistItems().list(
+            playlistId=uploads_playlist_id,
+            part="contentDetails",
             maxResults=50,
             pageToken=next_page,
         )
         resp = req.execute()
 
         for item in resp.get("items", []):
-            video_ids.append(item["id"]["videoId"])
+            video_ids.append(item["contentDetails"]["videoId"])
 
         next_page = resp.get("nextPageToken")
         if not next_page:
