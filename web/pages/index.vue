@@ -73,20 +73,20 @@ onMounted(load)
 
 .conti-card {
   @include card;
-  padding: 16px 20px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   transition: border-color .15s;
 
-  &:hover { border-color: rgba(124,92,255,0.4); }
+  &:hover { border-color: rgba(139,111,255,0.4); }
 }
 
 .conti-date {
   font-size: 14px;
   font-weight: 700;
   color: var(--accent);
-  min-width: 100px;
+  min-width: 90px;
 }
 
 .conti-name {
@@ -99,6 +99,15 @@ onMounted(load)
   gap: 12px;
   font-size: 13px;
   color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .conti-card {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .conti-date { min-width: auto; }
+  .conti-name { width: 100%; }
 }
 
 .conti-status {

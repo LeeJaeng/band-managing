@@ -19,7 +19,10 @@ onMounted(search)
 
 <template>
   <div class="page">
-    <h1>곡 DB</h1>
+    <div class="page-header">
+      <h1>곡 DB</h1>
+      <NuxtLink to="/songs/new" class="btn-accent">곡 등록</NuxtLink>
+    </div>
 
     <div class="search-bar">
       <input
@@ -55,7 +58,16 @@ onMounted(search)
 <style lang="scss" scoped>
 @use '@/assets/scss/mixins' as *;
 
-h1 { font-size: 24px; font-weight: 800; margin-bottom: 16px; }
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+
+  h1 { font-size: 24px; font-weight: 800; margin: 0; }
+}
+
+.btn-accent { @include btn-accent; }
 
 .search-bar {
   display: flex;

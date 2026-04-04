@@ -19,7 +19,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 16px;
   height: 56px;
   border-bottom: 1px solid var(--line);
   background: rgba(0,0,0,0.3);
@@ -51,6 +51,10 @@
 .main {
   max-width: 960px;
   margin: 0 auto;
-  padding: 24px 16px;
+  padding: 20px 16px;
+
+  @media (max-width: 640px) {
+    padding: 16px 12px;
+  }
 }
 </style>
