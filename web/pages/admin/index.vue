@@ -157,11 +157,21 @@ async function crawlAll() {
   await load()
 }
 
-async function approveReview(rq: any) {
+async function approveAsNew(rq: any) {
   try {
     await api(`/api/admin/review/${rq.id}/approve`, {
       method: 'POST',
       body: JSON.stringify({ song_title: rq.parsed_song_title }),
+    })
+  } catch (e: any) { alert(e.message || '승인 실패') }
+  await load()
+}
+
+async function approveWithSong(rq: any, songId: string) {
+  try {
+    await api(`/api/admin/review/${rq.id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ song_id: songId }),
     })
   } catch (e: any) { alert(e.message || '승인 실패') }
   await load()
@@ -259,10 +269,20 @@ onMounted(load)
         <div v-for="rq in reviewQueue" :key="rq.id" class="review-card">
           <div class="rv-info">
             <div class="rv-title">{{ rq.video_title }}</div>
-            <div class="rv-parsed">파싱: {{ rq.parsed_song_title || '(없음)' }}</div>
+            <div class="rv-parsed">파싱된 곡명: <strong>{{ rq.parsed_song_title || '(없음)' }}</strong></div>
+            <a :href="rq.youtube_url" target="_blank" class="rv-link">유튜브에서 보기</a>
+
+            <!-- 유사곡 후보 -->
+            <div v-if="(rq.candidates || []).length > 0" class="rv-candidates">
+              <div class="rv-candidates-label">비슷한 곡이 DB에 있어요:</div>
+              <div v-for="c in rq.candidates" :key="c.id" class="candidate-item">
+                <span>{{ c.title }}</span>
+                <button class="btn-xs approve" @click="approveWithSong(rq, c.id)">이 곡에 추가</button>
+              </div>
+            </div>
           </div>
           <div class="rv-actions">
-            <button class="btn-sm approve" @click="approveReview(rq)">승인</button>
+            <button class="btn-sm approve" @click="approveAsNew(rq)">새 곡으로 등록</button>
             <button class="btn-sm danger" @click="rejectReview(rq)">거부</button>
           </div>
         </div>
@@ -373,14 +393,45 @@ label {
 
 .review-card {
   @include card; padding: 14px 16px;
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: 8px; gap: 12px;
 }
 
 .rv-info { flex: 1; min-width: 0; }
 .rv-title { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
-.rv-parsed { font-size: 13px; color: var(--text-dim); }
-.rv-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.rv-parsed { font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
+.rv-link { font-size: 12px; color: var(--accent); &:hover { text-decoration: underline; } }
+.rv-actions { display: flex; gap: 6px; flex-shrink: 0; flex-direction: column; }
+
+.rv-candidates {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.rv-candidates-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--green);
+  margin-bottom: 6px;
+}
+
+.candidate-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.btn-xs {
+  padding: 2px 10px; border-radius: 6px; border: 1px solid var(--line);
+  background: transparent; font-size: 11px; cursor: pointer;
+  &.approve { color: var(--green); &:hover { background: var(--green-soft); } }
+}
 
 .log-card {
   @include card; padding: 10px 14px;

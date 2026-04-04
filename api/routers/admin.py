@@ -188,8 +188,16 @@ def list_review_queue(
         .limit(limit)
         .all()
     )
-    return [
-        {
+    result = []
+    for rq in items:
+        # 파싱된 제목으로 유사곡 검색
+        candidates = []
+        if rq.parsed_song_title:
+            like = f"%{rq.parsed_song_title}%"
+            matched = db.query(Song).filter(Song.title.ilike(like)).limit(5).all()
+            candidates = [{"id": s.id, "title": s.title} for s in matched]
+
+        result.append({
             "id": rq.id,
             "youtube_video_id": rq.youtube_video_id,
             "youtube_url": rq.youtube_url,
@@ -199,9 +207,9 @@ def list_review_queue(
             "suggested_song_id": rq.suggested_song_id,
             "status": rq.status,
             "created_at": rq.created_at.isoformat() if rq.created_at else None,
-        }
-        for rq in items
-    ]
+            "candidates": candidates,
+        })
+    return result
 
 
 @router.post("/review/{review_id}/approve")
