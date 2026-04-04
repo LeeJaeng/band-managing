@@ -54,7 +54,11 @@ async function crawlChannel(channelId: string) {
   crawling.value = true
   try {
     const result = await api<any>(`/api/admin/crawl/${channelId}`, { method: 'POST' })
-    if (result.error) alert(`크롤링 실패: ${result.error}`)
+    if (result.error) {
+      alert(`크롤링 실패: ${result.error}`)
+    } else {
+      alert(`크롤링 완료!\n영상 ${result.videos_found}개 발견\n레퍼런스 +${result.refs_added}개`)
+    }
   } catch (e: any) { alert(e.message || '크롤링 실패') }
   crawling.value = false
   await load()
@@ -62,7 +66,15 @@ async function crawlChannel(channelId: string) {
 
 async function crawlAll() {
   crawling.value = true
-  await api('/api/admin/crawl/all', { method: 'POST' })
+  try {
+    const result = await api<any>('/api/admin/crawl/all', { method: 'POST' })
+    const summary = (result.results || []).map((r: any) =>
+      r.error
+        ? `${r.channel_name}: 실패 - ${r.error}`
+        : `${r.channel_name}: 영상 ${r.videos_found}개, 레퍼런스 +${r.refs_added}개`
+    ).join('\n')
+    alert(`전체 크롤링 완료! (${result.channels_crawled}개 채널)\n\n${summary}`)
+  } catch (e: any) { alert(e.message || '크롤링 실패') }
   crawling.value = false
   await load()
 }
