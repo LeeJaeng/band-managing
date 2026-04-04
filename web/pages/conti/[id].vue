@@ -115,7 +115,6 @@ onMounted(load)
             @click="addSong(song)"
           >
             <span class="song-title">{{ song.title }}</span>
-            <span v-if="song.artist" class="song-artist">{{ song.artist }}</span>
             <span v-if="song.default_key" class="key-badge">{{ song.default_key }}</span>
           </div>
         </div>

@@ -8,7 +8,7 @@ const loading = ref(true)
 const editing = ref(false)
 
 // 편집 폼
-const editForm = ref({ title: '', artist: '', keys: [] as string[], lyrics: '' })
+const editForm = ref({ title: '', keys: [] as string[], lyrics: '' })
 
 // 키 목록
 const ALL_KEYS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B',
@@ -27,7 +27,6 @@ async function load() {
 function startEdit() {
   editForm.value = {
     title: song.value.title,
-    artist: song.value.artist || '',
     keys: [...(song.value.keys || [])],
     lyrics: song.value.lyrics || '',
   }
@@ -118,7 +117,6 @@ onMounted(load)
       <div class="song-header">
         <div>
           <h1>{{ song.title }}</h1>
-          <p v-if="song.artist" class="artist">{{ song.artist }}</p>
         </div>
         <div class="header-actions">
           <button class="btn" @click="startEdit" v-if="!editing">편집</button>
@@ -132,9 +130,6 @@ onMounted(load)
 
         <label>곡 제목</label>
         <input v-model="editForm.title" class="input" />
-
-        <label>원곡자</label>
-        <input v-model="editForm.artist" class="input" placeholder="원곡자 / 작곡자" />
 
         <label>키 (복수 선택 가능)</label>
         <div class="key-selector">
@@ -234,7 +229,6 @@ onMounted(load)
   gap: 12px;
 
   h1 { font-size: 24px; font-weight: 800; margin: 0 0 4px; }
-  .artist { font-size: 15px; color: var(--text-dim); margin: 0; }
 }
 
 .header-actions { display: flex; gap: 8px; flex-shrink: 0; }

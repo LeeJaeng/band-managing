@@ -4,7 +4,6 @@ const { api } = useApi()
 
 const form = ref({
   title: '',
-  artist: '',
   default_key: '',
   lyrics: '',
 })
@@ -83,9 +82,6 @@ async function save() {
 
         <label>곡 제목 *</label>
         <input v-model="form.title" class="input" placeholder="예: 주만 바라볼찌라" />
-
-        <label>원곡자 / 작곡자</label>
-        <input v-model="form.artist" class="input" placeholder="예: 마커스워십" />
 
         <label>기본 키</label>
         <input v-model="form.default_key" class="input" placeholder="예: G, Am, Bb" />
