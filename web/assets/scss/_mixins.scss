@@ -30,7 +30,7 @@
   @include btn;
   background: var(--accent);
   border-color: var(--accent);
-  &:hover { background: lighten(#7c5cff, 8%); }
+  &:hover { background: #9a7fff; }
 }
 
 @mixin input {

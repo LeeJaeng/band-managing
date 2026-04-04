@@ -69,6 +69,6 @@ jobs:
             fi
 
             echo "== nginx check =="
-            curl -fsS http://localhost/api/health || true
+            curl -fsS http://localhost/health || true
 
             echo "== deploy done =="
