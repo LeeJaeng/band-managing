@@ -7,9 +7,9 @@ Band Managing 개발 참조 문서.
 | 영역 | 기술 |
 |------|------|
 | Frontend | Nuxt 3 · Vue 3 · TypeScript · SCSS |
-| Backend | Python · FastAPI · SQLAlchemy |
+| Backend | Python 3.12 · FastAPI · SQLAlchemy |
 | Database | PostgreSQL 16 |
-| Crawler | Python (유튜브 데이터 수집) |
+| Crawler | Python · YouTube Data API v3 |
 | Infra | Docker Compose · Nginx · AWS Lightsail |
 | CI/CD | GitHub Actions |
 
@@ -22,8 +22,11 @@ Band Managing 개발 참조 문서.
 | [web/](./web/) | 프론트엔드 설계 |
 | [crawler/](./crawler/) | 크롤링 봇 설계 |
 
-## 인프라 참조
+## 테스트
 
-기존 인프라 설정은 `infra-ref/`에 보관되어 있음.
-- Docker Compose, Nginx, Dockerfile 등
-- 새 프로젝트에 맞게 재구성 예정
+```bash
+cd api
+DATABASE_URL=sqlite:///./test.db pytest tests/ -v
+```
+
+45개 테스트: songs(15), contis(10), admin(9), crawler(11)

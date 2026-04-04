@@ -16,7 +16,7 @@
 
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy, PostgreSQL 16
 - **Frontend**: Nuxt 3, Vue 3, TypeScript, SCSS, pnpm
-- **Crawler**: Python (YouTube Data API)
+- **Crawler**: Python (YouTube Data API v3, playlistItems API)
 - **Infra**: Docker Compose, Nginx, AWS Lightsail
 - **CI/CD**: GitHub Actions (main push → 자동 배포)
 
@@ -28,13 +28,40 @@
 - MVP에서는 인증 없음, 추후 회원가입 시 추가
 
 ### 코드 컨벤션
-- API: FastAPI 라우터, SQLAlchemy ORM
+- API: FastAPI 라우터, SQLAlchemy ORM, Pydantic 스키마
 - Web: `<script setup lang="ts">`, Composition API, file-based routing
-- 스타일: SCSS, 모바일 우선, 다크 테마 기반
+- 스타일: SCSS (tokens + base + mixins), 다크 테마 기반
+- 테스트: pytest + SQLite in-memory, TestClient
 
 ### 배포
-- `main` push → GitHub Actions → Lightsail SSH → `docker compose up -d --build`
-- 헬스 체크: `GET /api/health`
+- `main` push → GitHub Actions → Lightsail SSH → `docker compose up -d --build --force-recreate`
+- Nginx reload 후 헬스 체크
+- 헬스 체크: `GET /health`
+
+### DB
+- PostgreSQL 16, 연결: 환경변수 `DATABASE_URL`
+- ORM: SQLAlchemy, 모델: `api/models.py`
+- 테이블: songs, song_references, song_sheets, contis, conti_items, crawl_channels, crawl_logs, review_queue
+
+### 크롤링
+- YouTube Data API v3 (playlistItems + videos)
+- 채널 업로드 재생목록(UU...)에서 영상 수집
+- 20분 초과 영상 무시, 예배실황/연주/inst/MR 등 필터링
+- @handle → UC... 채널 ID 자동 변환
+- 곡 매칭: 제목 유사도 → 매칭되면 레퍼런스 추가, 안 되면 검증 큐
+
+### 캐시
+- Nginx: HTML은 no-cache, /_nuxt/ 에셋은 immutable (해시 기반)
+- 프론트 API 호출 시 timestamp 쿼리로 캐시 방지
+
+## 테스트
+
+```bash
+cd api
+DATABASE_URL=sqlite:///./test.db pytest tests/ -v
+```
+
+45개 테스트 (songs, contis, admin, crawler)
 
 ## 문서 참조
 
