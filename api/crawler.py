@@ -26,6 +26,22 @@ STRIP_PATTERNS = [
     r"lyrics?\s*video",
     r"\|.*$",             # | 뒤의 모든 텍스트
     r"-\s*\d{4}.*$",      # - 2024 라이브
+    r"𝑳𝒊𝒗𝒆\s*𝑪𝒍𝒊𝒑",    # Live Clip (스타일 폰트)
+    r"live\s*clip",
+]
+
+# 제목에서 제거할 사역팀 이름들
+TEAM_NAMES = [
+    "마커스워십", "마커스 워십", "markers worship", "markersworship",
+    "어노인팅", "anointing",
+    "아이자야씩스티원", "isaiah 61", "isaiah61",
+    "위러브", "welove", "we love",
+    "잔치공동체", "잔치 공동체",
+    "피아워십", "pia worship", "piaworship",
+    "기프티드", "gifted",
+    "사운드오브워십", "sound of worship",
+    "예람워십", "yeram worship",
+    "ciy", "cgn",
 ]
 
 # 키 감지 패턴
@@ -51,8 +67,20 @@ SKIP_TYPE_KEYWORDS = [
     "shorts",
 ]
 
-# 최대 영상 길이 (초) — 20분 초과 영상 무시
-MAX_DURATION_SECONDS = 1200
+# 최대 영상 길이 (초) — 10분 초과 영상 무시
+MAX_DURATION_SECONDS = 600
+
+# 곡 두 개 이상 합쳐진 영상 감지 패턴
+MULTI_SONG_PATTERNS = [
+    r"\+",                # A곡 + B곡
+    r"\&",                # A곡 & B곡
+    r"medley",            # 메들리
+    r"메들리",
+    r"모음",              # 찬양 모음
+    r"연속\s*듣기",
+    r"playlist",
+    r"worship\s*set",
+]
 
 
 def parse_song_title(video_title: str) -> str:
@@ -60,7 +88,12 @@ def parse_song_title(video_title: str) -> str:
     title = video_title.strip()
     for pattern in STRIP_PATTERNS:
         title = re.sub(pattern, "", title, flags=re.IGNORECASE)
-    title = title.strip(" -–—·|")
+    # 사역팀 이름 제거
+    for team in TEAM_NAMES:
+        title = re.sub(re.escape(team), "", title, flags=re.IGNORECASE)
+    # " - " 뒤에 남은 텍스트 제거 (보통 팀 이름이 뒤에 붙음)
+    title = re.sub(r"\s*-\s*$", "", title)
+    title = title.strip(" -–—·|,")
     return title if title else video_title.strip()
 
 
@@ -71,13 +104,17 @@ def detect_key(text: str) -> str | None:
 
 
 def should_skip_video(title: str) -> bool:
-    """예배 실황, 연주, inst 등 스킵해야 할 영상인지 확인."""
+    """예배 실황, 연주, inst, 합쳐진 곡 등 스킵해야 할 영상인지 확인."""
     lower = title.lower()
     for kw in SKIP_KEYWORDS:
         if kw.lower() in lower:
             return True
     for kw in SKIP_TYPE_KEYWORDS:
         if kw.lower() in lower:
+            return True
+    # 곡 두 개 이상 합쳐진 영상
+    for pattern in MULTI_SONG_PATTERNS:
+        if re.search(pattern, title, re.IGNORECASE):
             return True
     return False
 
