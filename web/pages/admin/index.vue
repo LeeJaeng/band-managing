@@ -7,10 +7,11 @@ const reviewQueue = ref<any[]>([])
 const loading = ref(true)
 const crawling = ref(false)
 
-// 채널 등록/편집 폼
-const channelForm = ref({ name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' })
+// 채널 등록/편집
 const showChannelForm = ref(false)
 const editingChannelId = ref<string | null>(null)
+const channelForm = ref({ name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' })
+const resolving = ref(false)
 
 async function load() {
   loading.value = true
@@ -23,6 +24,12 @@ async function load() {
   logs.value = lg
   reviewQueue.value = rq
   loading.value = false
+}
+
+function extractHandle(url: string): string {
+  // https://youtube.com/@MarkersWorship?si=xxx → MarkersWorship
+  const match = url.match(/@([a-zA-Z0-9_-]+)/)
+  return match ? match[1] : ''
 }
 
 function openAddForm() {
@@ -47,21 +54,49 @@ function closeForm() {
   editingChannelId.value = null
 }
 
+async function resolveFromUrl() {
+  const url = channelForm.value.youtube_channel_url.trim()
+  if (!url) { alert('URL을 입력해주세요.'); return }
+
+  const handle = extractHandle(url)
+  if (!handle) { alert('URL에서 @handle을 찾을 수 없습니다.\n예: https://youtube.com/@MarkersWorship'); return }
+
+  resolving.value = true
+  try {
+    const result = await api<any>(`/api/admin/channels/resolve-id?youtube_channel_id=${encodeURIComponent(handle)}`)
+    channelForm.value.youtube_channel_id = result.channel_id
+    if (result.name && !channelForm.value.name) {
+      channelForm.value.name = result.name
+    }
+  } catch (e: any) {
+    alert(e.message || '채널을 찾을 수 없습니다.')
+  }
+  resolving.value = false
+}
+
 async function saveChannel() {
-  if (!channelForm.value.name || !channelForm.value.youtube_channel_id) {
-    alert('이름과 채널 ID는 필수입니다.')
+  // URL만 넣고 채널ID가 비어있으면 자동 변환 시도
+  if (!channelForm.value.youtube_channel_id && channelForm.value.youtube_channel_url) {
+    await resolveFromUrl()
+  }
+
+  if (!channelForm.value.youtube_channel_id) {
+    alert('채널 ID를 확인할 수 없습니다.')
+    return
+  }
+
+  if (!channelForm.value.name) {
+    alert('사역팀 이름을 입력해주세요.')
     return
   }
 
   try {
     if (editingChannelId.value) {
-      // 수정
       await api(`/api/admin/channels/${editingChannelId.value}`, {
         method: 'PUT',
         body: JSON.stringify(channelForm.value),
       })
     } else {
-      // 등록
       await api('/api/admin/channels', {
         method: 'POST',
         body: JSON.stringify(channelForm.value),
@@ -163,14 +198,28 @@ onMounted(load)
         <!-- 채널 추가/편집 폼 -->
         <div v-if="showChannelForm" class="add-form">
           <h3>{{ editingChannelId ? '채널 수정' : '채널 추가' }}</h3>
-          <input v-model="channelForm.name" class="input" placeholder="사역팀 이름 (예: 마커스워십)" />
-          <input v-model="channelForm.youtube_channel_url" class="input" placeholder="유튜브 채널 URL (예: https://youtube.com/@MarkersWorship)" />
-          <input v-model="channelForm.youtube_channel_id" class="input" placeholder="채널 ID (@MarkersWorship 또는 UC...)" />
+
+          <label>유튜브 채널 URL</label>
+          <div class="url-row">
+            <input v-model="channelForm.youtube_channel_url" class="input" placeholder="https://youtube.com/@MarkersWorship" />
+            <button class="btn" :disabled="resolving" @click="resolveFromUrl">
+              {{ resolving ? '확인 중...' : '자동입력' }}
+            </button>
+          </div>
+
+          <label>사역팀 이름</label>
+          <input v-model="channelForm.name" class="input" placeholder="자동입력됩니다" />
+
+          <label>채널 ID</label>
+          <input v-model="channelForm.youtube_channel_id" class="input" placeholder="자동입력됩니다 (UC...)" readonly />
+
+          <label>신뢰도</label>
           <select v-model="channelForm.trust_level" class="input">
             <option value="HIGH">HIGH</option>
             <option value="MEDIUM">MEDIUM</option>
             <option value="LOW">LOW</option>
           </select>
+
           <div class="form-actions">
             <button class="btn-accent" @click="saveChannel">{{ editingChannelId ? '수정' : '등록' }}</button>
             <button class="btn" @click="closeForm">취소</button>
@@ -187,7 +236,7 @@ onMounted(load)
               </span>
             </div>
             <div class="ch-meta">
-              <span>ID: {{ ch.youtube_channel_id }}</span>
+              <span>{{ ch.youtube_channel_id }}</span>
               <span v-if="ch.last_crawled_at"> · 마지막: {{ ch.last_crawled_at }}</span>
             </div>
             <div class="ch-actions">
@@ -243,6 +292,13 @@ h1 { font-size: 24px; font-weight: 800; margin-bottom: 24px; }
 h2 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
 h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 
+label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
 .btn { @include btn; }
 .btn-accent { @include btn-accent; }
 .input { @include input; }
@@ -256,7 +312,6 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
   margin-bottom: 16px;
   flex-wrap: wrap;
   gap: 8px;
-
   h2 { margin: 0; }
 }
 
@@ -267,22 +322,21 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 16px;
 }
 
-.form-actions { display: flex; gap: 8px; }
-
-.channel-list {
+.url-row {
   display: flex;
-  flex-direction: column;
   gap: 8px;
+  .input { flex: 1; }
 }
 
-.channel-card {
-  @include card;
-  padding: 14px 16px;
-}
+.form-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+.channel-list { display: flex; flex-direction: column; gap: 8px; }
+
+.channel-card { @include card; padding: 14px 16px; }
 
 .ch-info {
   display: flex;
@@ -295,10 +349,7 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 .ch-name { font-weight: 600; }
 
 .trust {
-  padding: 1px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
   &.high { background: var(--green-soft); color: var(--green); }
   &.medium { background: var(--accent-soft); color: var(--accent); }
   &.low { background: var(--red-soft); color: var(--red); }
@@ -307,27 +358,12 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 .active { color: var(--green); font-size: 12px; }
 .inactive { color: var(--red); font-size: 12px; }
 
-.ch-meta {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-  word-break: break-all;
-}
-
-.ch-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+.ch-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; word-break: break-all; }
+.ch-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .btn-sm {
-  padding: 4px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,0.02);
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
+  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02); color: var(--text); font-size: 12px; cursor: pointer;
   &:hover { background: rgba(255,255,255,0.05); }
   &.danger { color: var(--red); &:hover { background: var(--red-soft); } }
   &.approve { color: var(--green); &:hover { background: var(--green-soft); } }
@@ -335,13 +371,9 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 }
 
 .review-card {
-  @include card;
-  padding: 14px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  gap: 12px;
+  @include card; padding: 14px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px; gap: 12px;
 }
 
 .rv-info { flex: 1; min-width: 0; }
@@ -350,21 +382,13 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 .rv-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .log-card {
-  @include card;
-  padding: 10px 14px;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  margin-bottom: 6px;
-  font-size: 13px;
-  flex-wrap: wrap;
+  @include card; padding: 10px 14px;
+  display: flex; gap: 14px; align-items: center;
+  margin-bottom: 6px; font-size: 13px; flex-wrap: wrap;
 }
 
 .log-status {
-  padding: 1px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
   &.success { background: var(--green-soft); color: var(--green); }
   &.failed { background: var(--red-soft); color: var(--red); }
   &.running { background: var(--accent-soft); color: var(--accent); }
@@ -373,23 +397,16 @@ h3 { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
 .log-time { color: var(--text-dim); }
 
 .log-error-detail {
-  padding: 8px 14px;
-  font-size: 12px;
-  color: var(--red);
-  background: var(--red-soft);
-  border-radius: var(--radius);
-  margin-bottom: 6px;
-  word-break: break-all;
+  padding: 8px 14px; font-size: 12px; color: var(--red);
+  background: var(--red-soft); border-radius: var(--radius);
+  margin-bottom: 6px; word-break: break-all;
 }
 
-.loading, .empty {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-dim);
-}
+.loading, .empty { text-align: center; padding: 20px; color: var(--text-dim); }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
   .review-card { flex-direction: column; align-items: flex-start; }
+  .url-row { flex-direction: column; }
 }
 </style>
