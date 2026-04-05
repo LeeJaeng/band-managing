@@ -195,7 +195,6 @@ def list_crawl_logs(
 @router.get("/review-queue")
 def list_review_queue(
     status: str = Query(default="PENDING"),
-    limit: int = Query(default=50, le=200),
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -203,7 +202,6 @@ def list_review_queue(
         db.query(ReviewQueue)
         .filter(ReviewQueue.status == status)
         .order_by(ReviewQueue.created_at.desc())
-        .limit(limit)
         .all()
     )
     result = []
