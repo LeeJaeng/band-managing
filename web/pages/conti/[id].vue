@@ -110,6 +110,22 @@ async function searchSongs() {
   searching.value = false
 }
 
+async function registerAndAddSong() {
+  const title = searchQuery.value.trim()
+  if (!title) return
+  try {
+    // 임시 곡 등록 (user_id에 연결됨)
+    const song = await api<any>('/api/songs', {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    })
+    // 바로 콘티에 추가
+    await addSong({ id: song.id, title: song.title, keys: [], default_key: null })
+    searchQuery.value = ''
+    searchResults.value = []
+  } catch (e: any) { alert(e.message || '곡 등록 실패') }
+}
+
 async function addSong(song: any) {
   const nextOrder = (conti.value.items?.length || 0) + 1
   // 곡 DB에 키가 있으면 첫 번째 키를 use_key로 선입력
@@ -369,6 +385,14 @@ onMounted(() => {
             </span>
             <span v-else-if="song.default_key" class="key-badge">{{ song.default_key }}</span>
           </div>
+        </div>
+
+        <!-- 검색 결과 없을 때 직접 등록 -->
+        <div v-if="!searching && searchQuery.trim() && searchResults.length === 0" class="no-results">
+          <p>"{{ searchQuery }}" 곡이 DB에 없습니다.</p>
+          <button class="btn-accent" @click="registerAndAddSong">
+            "{{ searchQuery }}" 곡 등록하고 추가
+          </button>
         </div>
       </div>
     </template>
@@ -730,6 +754,16 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.no-results {
+  margin-top: 12px;
+  text-align: center;
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 14px;
+
+  p { margin: 0 0 12px; }
 }
 
 .search-item {

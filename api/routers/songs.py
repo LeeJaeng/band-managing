@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 from pydantic import BaseModel
 
 from db import get_db
@@ -60,14 +60,27 @@ def list_songs(
     source: str = Query(default="", description="소스 필터 (CRAWLED/MANUAL/USER)"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
+    user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     query = db.query(Song)
+    if source:
+        # 관리자용 소스 필터 (유저 등록 곡 정제 큐)
+        query = query.filter(Song.source == source)
+    else:
+        # 일반 조회: 정식 곡 + 본인 임시 곡
+        if user:
+            query = query.filter(
+                or_(
+                    Song.source.in_(["MANUAL", "CRAWLED"]),
+                    and_(Song.source == "USER", Song.user_id == user.id),
+                )
+            )
+        else:
+            query = query.filter(Song.source.in_(["MANUAL", "CRAWLED"]))
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Song.title.ilike(like), Song.lyrics.ilike(like)))
-    if source:
-        query = query.filter(Song.source == source)
     total = query.count()
     songs = (
         query.options(joinedload(Song.references))
@@ -139,12 +152,15 @@ def get_song(song_id: str, db: Session = Depends(get_db)):
 
 @router.post("", status_code=201)
 def create_song(body: SongCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    source = "MANUAL" if user.role == "ADMIN" else "USER"
-    song = Song(title=body.title, artist=body.artist, default_key=body.default_key, keys=body.keys, lyrics=body.lyrics, source=source)
+    if user.role == "ADMIN":
+        song = Song(title=body.title, artist=body.artist, default_key=body.default_key, keys=body.keys, lyrics=body.lyrics, source="MANUAL")
+    else:
+        # 일반 유저: user_id에 연결된 임시 곡
+        song = Song(title=body.title, artist=body.artist, default_key=body.default_key, keys=body.keys, lyrics=body.lyrics, source="USER", user_id=user.id)
     db.add(song)
     db.commit()
     db.refresh(song)
-    return {"id": song.id, "title": song.title}
+    return {"id": song.id, "title": song.title, "source": song.source}
 
 
 @router.put("/{song_id}")

@@ -32,7 +32,7 @@ onMounted(search)
   <div class="page">
     <div class="page-header">
       <h1>곡 DB</h1>
-      <NuxtLink to="/songs/new" class="btn-accent">곡 등록</NuxtLink>
+      <NuxtLink v-if="isAdmin" to="/songs/new" class="btn-accent">곡 등록</NuxtLink>
     </div>
 
     <div class="search-bar">

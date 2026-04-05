@@ -284,5 +284,7 @@ def update_song_source(song_id: str, body: SongSourceUpdate, _: User = Depends(r
     if not song:
         raise HTTPException(404, "Song not found")
     song.source = body.source
+    if body.source in ("MANUAL", "CRAWLED"):
+        song.user_id = None  # 정식 곡으로 전환 → 소유자 제거
     db.commit()
     return {"ok": True, "source": song.source}
