@@ -1,0 +1,41 @@
+name: Daily Crawl
+
+on:
+  schedule:
+    - cron: '0 21 * * *'  # UTC 21:00 = KST 06:00 (매일 아침 6시)
+  workflow_dispatch:       # 수동 실행도 가능
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger crawl via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          port: ${{ secrets.LIGHTSAIL_PORT }}
+          script: |
+            set -e
+            echo "== daily crawl start =="
+
+            docker compose -f /home/ubuntu/band-managing/docker-compose.yml exec -T api \
+              python -c "
+from db import SessionLocal
+from models import CrawlChannel
+from crawler import crawl_channel
+
+db = SessionLocal()
+channels = db.query(CrawlChannel).filter(CrawlChannel.is_active == True).all()
+print(f'Active channels: {len(channels)}')
+for ch in channels:
+    print(f'Crawling: {ch.name}')
+    result = crawl_channel(ch, db)
+    print(f'  -> {result.get(\"status\")}, videos: {result.get(\"videos_found\", 0)}, refs: {result.get(\"refs_added\", 0)}')
+db.close()
+print('Done')
+"
+
+            echo "== daily crawl done =="
