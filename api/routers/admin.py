@@ -226,6 +226,99 @@ def list_review_queue(
     return result
 
 
+@router.get("/review-queue/export")
+def export_review_queue(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """검증 큐를 Claude Code에 붙여넣기 가능한 텍스트로 내보내기."""
+    items = (
+        db.query(ReviewQueue)
+        .filter(ReviewQueue.status == "PENDING")
+        .order_by(ReviewQueue.created_at.desc())
+        .all()
+    )
+    if not items:
+        return {"text": "== 검증 큐 비어있음 ==", "count": 0}
+
+    lines = [f"== 검증 큐 ({len(items)}개) =="]
+    lines.append("아래 내용을 Claude Code에 붙여넣으면 곡 매칭/등록을 처리합니다.")
+    lines.append("각 항목에 대해: 승인(기존곡 매칭 or 새곡) / 거부 를 판단해주세요.")
+    lines.append("")
+
+    for i, rq in enumerate(items, 1):
+        # 유사곡 검색
+        candidates_str = "없음"
+        if rq.parsed_song_title:
+            like = f"%{rq.parsed_song_title}%"
+            matched = db.query(Song).filter(Song.title.ilike(like)).limit(3).all()
+            if matched:
+                candidates_str = ", ".join(f"{s.title}(id:{s.id})" for s in matched)
+
+        lines.append(
+            f"{i}. [review_id:{rq.id}] \"{rq.video_title}\" "
+            f"→ 파싱: \"{rq.parsed_song_title or '(없음)'}\" "
+            f"| 유사곡: {candidates_str} "
+            f"| URL: {rq.youtube_url}"
+        )
+
+    lines.append("")
+    lines.append("---")
+    lines.append("처리 형식: 각 번호에 대해")
+    lines.append("- 기존곡 매칭: POST /api/admin/review/{review_id}/approve {\"song_id\": \"곡ID\"}")
+    lines.append("- 새곡 등록: POST /api/admin/review/{review_id}/approve {\"song_title\": \"곡제목\"}")
+    lines.append("- 거부: POST /api/admin/review/{review_id}/reject")
+
+    return {"text": "\n".join(lines), "count": len(items)}
+
+
+@router.post("/review/batch")
+def batch_review(body: dict, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """검증 큐 일괄 처리. body: {"actions": [{"review_id": "...", "action": "approve|reject", "song_id": "...", "song_title": "..."}]}"""
+    actions = body.get("actions", [])
+    results = []
+    for action in actions:
+        review_id = action.get("review_id")
+        act = action.get("action")
+        rq = db.query(ReviewQueue).filter(ReviewQueue.id == review_id).first()
+        if not rq:
+            results.append({"review_id": review_id, "status": "NOT_FOUND"})
+            continue
+
+        if act == "reject":
+            rq.status = "REJECTED"
+            rq.reviewed_at = datetime.utcnow()
+            results.append({"review_id": review_id, "status": "REJECTED"})
+        elif act == "approve":
+            song_id = action.get("song_id")
+            song_title = action.get("song_title")
+
+            if song_id:
+                song = db.query(Song).filter(Song.id == song_id).first()
+                if not song:
+                    results.append({"review_id": review_id, "status": "SONG_NOT_FOUND"})
+                    continue
+            else:
+                title = song_title or rq.parsed_song_title or rq.video_title
+                song = Song(title=title)
+                db.add(song)
+                db.flush()
+
+            ref = SongReference(
+                song_id=song.id,
+                youtube_url=rq.youtube_url,
+                youtube_video_id=rq.youtube_video_id,
+                title=rq.video_title,
+                channel_id=rq.channel_id,
+                trust_level="HIGH",
+                source="CRAWL",
+            )
+            db.add(ref)
+            rq.status = "APPROVED"
+            rq.reviewed_at = datetime.utcnow()
+            results.append({"review_id": review_id, "status": "APPROVED", "song_id": song.id})
+
+    db.commit()
+    return {"processed": len(results), "results": results}
+
+
 @router.post("/review/{review_id}/approve")
 def approve_review(review_id: str, body: ReviewApprove, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     rq = db.query(ReviewQueue).filter(ReviewQueue.id == review_id).first()

@@ -269,6 +269,20 @@ async function rejectReview(rq: any) {
   await load()
 }
 
+async function exportReviewQueue() {
+  try {
+    const data = await api<any>(`/api/admin/review-queue/export?_t=${Date.now()}`)
+    if (data.count === 0) {
+      alert('검증 큐가 비어있습니다.')
+      return
+    }
+    await navigator.clipboard.writeText(data.text)
+    alert(`검증 큐 ${data.count}개 항목이 클립보드에 복사되었습니다.\nClaude Code에 붙여넣으세요.`)
+  } catch (e: any) {
+    alert(e.message || '내보내기 실패')
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -408,7 +422,10 @@ onMounted(load)
 
       <!-- 검증 큐 -->
       <section class="section">
-        <h2>검증 큐 ({{ reviewQueue.length }})</h2>
+        <div class="section-header">
+          <h2>검증 큐 ({{ reviewQueue.length }})</h2>
+          <button v-if="reviewQueue.length > 0" class="btn" @click="exportReviewQueue">Claude Code로 내보내기</button>
+        </div>
         <div v-if="reviewQueue.length === 0" class="empty">대기 중인 항목 없음</div>
         <div v-for="rq in reviewQueue" :key="rq.id" class="review-card">
           <div class="rv-info">
