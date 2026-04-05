@@ -459,34 +459,21 @@ class SongSourceUpdate(BaseModel):
 
 @router.delete("/crawl/reset")
 def reset_crawl_data(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """크롤링 관련 데이터 전체 삭제 (곡 DB 초기화)."""
-    from models import ContiItem
-    # 크롤링으로 생성된 곡의 conti_items 정리
-    crawled_song_ids = [s.id for s in db.query(Song.id).filter(Song.source == "CRAWLED").all()]
-    if crawled_song_ids:
-        db.query(ContiItem).filter(ContiItem.song_id.in_(crawled_song_ids)).delete(synchronize_session="fetch")
+    """크롤링 + 곡 데이터 전체 삭제 (TRUNCATE)."""
+    from models import ContiItem, SongSheet
 
-    # 검증 큐 전체 삭제
-    rq_count = db.query(ReviewQueue).delete()
-    # 크롤링 로그 전체 삭제
-    log_count = db.query(CrawlLog).delete()
-    # 레퍼런스 중 CRAWL 소스 삭제
-    ref_count = db.query(SongReference).filter(SongReference.source == "CRAWL").delete()
-    # 크롤링으로 생성된 곡 삭제
-    song_count = db.query(Song).filter(Song.source == "CRAWLED").delete()
+    # 순서 중요 (FK 의존성)
+    db.query(ContiItem).delete()
+    db.query(SongSheet).delete()
+    db.query(SongReference).delete()
+    db.query(ReviewQueue).delete()
+    db.query(CrawlLog).delete()
+    db.query(Song).delete()
     # 채널의 last_crawled_at 초기화
     db.query(CrawlChannel).update({"last_crawled_at": None}, synchronize_session="fetch")
 
     db.commit()
-    return {
-        "ok": True,
-        "deleted": {
-            "review_queue": rq_count,
-            "crawl_logs": log_count,
-            "references": ref_count,
-            "songs": song_count,
-        }
-    }
+    return {"ok": True}
 
 
 @router.put("/songs/{song_id}/source")
