@@ -17,7 +17,6 @@ onMounted(async () => {
         <NuxtLink to="/songs">곡 DB</NuxtLink>
         <NuxtLink v-if="isAdmin" to="/admin">관리자</NuxtLink>
         <template v-if="isLoggedIn">
-          <span class="nav-user">{{ user?.display_name }}</span>
           <button class="nav-logout" @click="logout">로그아웃</button>
         </template>
         <NuxtLink v-else to="/login" class="nav-login">로그인</NuxtLink>

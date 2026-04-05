@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
             admin_user = User(
                 username="jeansvvv",
                 password_hash=hash_password("spdhvhzj"),
-                display_name="관리자",
+                display_name="jeansvvv",
                 role="ADMIN",
             )
             session.add(admin_user)
