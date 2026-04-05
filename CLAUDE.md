@@ -40,6 +40,23 @@
 - Nginx reload 후 헬스 체크
 - 헬스 체크: `GET /health`
 
+### 의존성 변경 시 필수 확인
+push 전에 반드시 이 세션에서 호환성 테스트:
+```bash
+# 1. 의존성 설치 테스트
+pip install -r api/requirements.txt
+
+# 2. import + 핵심 기능 동작 확인
+python -c "from passlib.context import CryptContext; ..."
+python -c "from jose import jwt; ..."
+
+# 3. 테스트 실행
+DATABASE_URL=sqlite:///./test.db pytest tests/ -v
+```
+- passlib 1.7.4 + bcrypt는 반드시 bcrypt<5.0.0 (4.2.1 고정)
+- python-jose[cryptography]는 cffi 빌드 필요 (Dockerfile에 gcc, libffi-dev)
+- 새 패키지 추가 시 Dockerfile 빌드 의존성도 확인
+
 ### DB
 - PostgreSQL 16, 연결: 환경변수 `DATABASE_URL`
 - ORM: SQLAlchemy, 모델: `api/models.py`
