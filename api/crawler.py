@@ -93,7 +93,11 @@ def parse_song_title(video_title: str) -> str:
         title = re.sub(re.escape(team), "", title, flags=re.IGNORECASE)
     # " - " 뒤에 남은 텍스트 제거 (보통 팀 이름이 뒤에 붙음)
     title = re.sub(r"\s*-\s*$", "", title)
-    title = title.strip(" -–—·|,")
+    # 따옴표, 특수 유니코드 문자 제거
+    title = re.sub(r'["\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f\uff02]', '', title)
+    # 괄호 안 영어 제목이 남아있으면 제거 (선택)
+    # 앞뒤 공백/특수문자 정리
+    title = title.strip(" -–—·|,.'\"")
     return title if title else video_title.strip()
 
 

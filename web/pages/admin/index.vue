@@ -262,6 +262,15 @@ async function deleteUserSong(song: any) {
   } catch (e: any) { alert(e.message || '삭제 실패') }
 }
 
+async function resetCrawlData() {
+  if (!confirm('크롤링 데이터를 전부 삭제하시겠습니까?\n(검증 큐, 크롤링 로그, 크롤링으로 생성된 곡/레퍼런스 전부 삭제)')) return
+  try {
+    const result = await api<any>('/api/admin/crawl/reset', { method: 'DELETE' })
+    alert(`삭제 완료!\n곡: ${result.deleted.songs}개\n레퍼런스: ${result.deleted.references}개\n검증큐: ${result.deleted.review_queue}개\n로그: ${result.deleted.crawl_logs}개`)
+    await load()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
 async function rejectReview(rq: any) {
   try {
     await api(`/api/admin/review/${rq.id}/reject`, { method: 'POST' })
@@ -380,6 +389,7 @@ onMounted(load)
             <button class="btn-accent" :disabled="crawling" @click="crawlAll">
               {{ crawling ? '크롤링 중...' : '전체 크롤링' }}
             </button>
+            <button class="btn-sm danger" @click="resetCrawlData">초기화</button>
           </div>
         </div>
 
