@@ -21,6 +21,16 @@ export function useAuth() {
     return data.user
   }
 
+  async function register(username: string, password: string, displayName: string) {
+    const data = await api<any>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, display_name: displayName }),
+    })
+    token.value = data.access_token
+    user.value = data.user
+    return data.user
+  }
+
   function logout() {
     token.value = null
     user.value = null
@@ -41,5 +51,5 @@ export function useAuth() {
     }
   }
 
-  return { token, user, isLoggedIn, isAdmin, login, logout, fetchUser }
+  return { token, user, isLoggedIn, isAdmin, login, register, logout, fetchUser }
 }

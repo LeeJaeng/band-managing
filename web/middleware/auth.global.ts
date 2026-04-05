@@ -4,7 +4,7 @@
  */
 export default defineNuxtRouteMiddleware(async (to) => {
   // 로그인 페이지와 공유 페이지는 예외
-  if (to.path === '/login' || to.path.startsWith('/conti/share/')) {
+  if (to.path === '/login' || to.path === '/register' || to.path.startsWith('/conti/share/')) {
     return
   }
 

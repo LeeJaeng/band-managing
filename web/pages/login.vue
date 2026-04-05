@@ -61,6 +61,10 @@ async function handleLogin() {
           {{ loading ? '로그인 중...' : '로그인' }}
         </button>
       </form>
+
+      <div class="register-link">
+        계정이 없으신가요? <NuxtLink to="/register">회원가입</NuxtLink>
+      </div>
     </div>
   </div>
 </template>
@@ -119,5 +123,14 @@ async function handleLogin() {
   color: var(--red);
   font-size: 13px;
   text-align: center;
+}
+
+.register-link {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 16px;
+
+  a { color: var(--accent); font-weight: 600; &:hover { text-decoration: underline; } }
 }
 </style>
