@@ -276,7 +276,19 @@ async function exportReviewQueue() {
       alert('검증 큐가 비어있습니다.')
       return
     }
-    await navigator.clipboard.writeText(data.text)
+    // 클립보드 복사 (HTTPS 없으면 fallback)
+    try {
+      await navigator.clipboard.writeText(data.text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = data.text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
     alert(`검증 큐 ${data.count}개 항목이 클립보드에 복사되었습니다.\nClaude Code에 붙여넣으세요.`)
   } catch (e: any) {
     alert(e.message || '내보내기 실패')
