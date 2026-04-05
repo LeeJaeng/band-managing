@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from db import get_db
 from models import Conti, ContiItem, ContiMember, Song, SongReference, TeamMember, User
-from auth import get_current_user
+from auth import get_current_user, get_current_user_optional
 
 router = APIRouter(prefix="/api/contis", tags=["contis"])
 
@@ -90,10 +90,12 @@ def _serialize_item(item: ContiItem) -> dict:
 def list_contis(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    total = db.query(Conti).count()
-    contis = db.query(Conti).order_by(Conti.date.desc()).offset(offset).limit(limit).all()
+    query = db.query(Conti).filter(Conti.user_id == user.id)
+    total = query.count()
+    contis = query.order_by(Conti.date.desc()).offset(offset).limit(limit).all()
     return {
         "total": total,
         "items": [
@@ -145,8 +147,8 @@ def get_conti(conti_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("", status_code=201)
-def create_conti(body: ContiCreate, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    conti = Conti(date=body.date, service_name=body.service_name, author=body.author)
+def create_conti(body: ContiCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    conti = Conti(date=body.date, service_name=body.service_name, author=body.author, user_id=current_user.id)
     db.add(conti)
     db.commit()
     db.refresh(conti)

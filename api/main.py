@@ -14,6 +14,7 @@ from routers import songs, contis, admin, team, auth as auth_router
 MIGRATIONS = [
     "ALTER TABLE songs ADD COLUMN IF NOT EXISTS keys JSON",
     "ALTER TABLE songs ADD COLUMN IF NOT EXISTS source VARCHAR(10) DEFAULT 'MANUAL'",
+    "ALTER TABLE contis ADD COLUMN IF NOT EXISTS user_id VARCHAR REFERENCES users(id)",
 ]
 
 

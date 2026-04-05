@@ -86,6 +86,7 @@ class Conti(Base):
     __tablename__ = "contis"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     service_name: Mapped[str] = mapped_column(String(100), nullable=False)
     author: Mapped[str] = mapped_column(String(100), nullable=False)

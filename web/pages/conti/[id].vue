@@ -93,7 +93,12 @@ const availableMembers = computed(() => {
 
 async function load() {
   loading.value = true
-  conti.value = await api<any>(`/api/contis/${route.params.id}`)
+  try {
+    conti.value = await api<any>(`/api/contis/${route.params.id}`)
+  } catch (e: any) {
+    console.error('conti load error:', e)
+    conti.value = null
+  }
   loading.value = false
 }
 

@@ -26,8 +26,27 @@ def test_list_contis(client, member_headers):
     client.post("/api/contis", json={"date": "2026-04-06", "service_name": "청년예배", "author": "A"}, headers=member_headers)
     client.post("/api/contis", json={"date": "2026-04-13", "service_name": "주일2부", "author": "B"}, headers=member_headers)
 
-    resp = client.get("/api/contis")
+    resp = client.get("/api/contis", headers=member_headers)
     assert resp.json()["total"] == 2
+
+
+def test_list_contis_requires_auth(client):
+    resp = client.get("/api/contis")
+    assert resp.status_code == 401
+
+
+def test_list_contis_only_own(client, member_headers, admin_headers):
+    """다른 유저의 콘티는 보이지 않아야 함."""
+    client.post("/api/contis", json={"date": "2026-04-06", "service_name": "멤버콘티", "author": "멤버"}, headers=member_headers)
+    client.post("/api/contis", json={"date": "2026-04-07", "service_name": "관리자콘티", "author": "관리자"}, headers=admin_headers)
+
+    member_list = client.get("/api/contis", headers=member_headers).json()
+    assert member_list["total"] == 1
+    assert member_list["items"][0]["service_name"] == "멤버콘티"
+
+    admin_list = client.get("/api/contis", headers=admin_headers).json()
+    assert admin_list["total"] == 1
+    assert admin_list["items"][0]["service_name"] == "관리자콘티"
 
 
 def test_get_conti_detail(client, member_headers):
