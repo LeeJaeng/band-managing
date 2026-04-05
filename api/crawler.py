@@ -167,8 +167,9 @@ def _resolve_channel_id(youtube, channel_id_or_handle: str) -> str:
     raise ValueError(f"채널을 찾을 수 없습니다: {channel_id_or_handle}")
 
 
-def _fetch_channel_videos(channel_id_or_handle: str) -> list[dict]:
-    """YouTube Data API로 채널의 영상 목록을 가져온다."""
+def _fetch_channel_videos(channel_id_or_handle: str, known_video_ids: set[str] | None = None) -> list[dict]:
+    """YouTube Data API로 채널의 영상 목록을 가져온다.
+    known_video_ids가 주어지면, 이미 수집된 영상을 만나면 조기 종료."""
     if not YOUTUBE_API_KEY:
         return []
 
@@ -182,9 +183,10 @@ def _fetch_channel_videos(channel_id_or_handle: str) -> list[dict]:
     # 업로드 재생목록 ID: UC... → UU...
     uploads_playlist_id = "UU" + resolved_id[2:]
 
-    # 1단계: playlistItems로 영상 ID 목록 수집
+    # 1단계: playlistItems로 영상 ID 목록 수집 (최신순)
     video_ids = []
     next_page = None
+    stop_early = False
 
     for _ in range(5):  # 최대 5페이지 (250개)
         req = youtube.playlistItems().list(
@@ -196,7 +198,15 @@ def _fetch_channel_videos(channel_id_or_handle: str) -> list[dict]:
         resp = req.execute()
 
         for item in resp.get("items", []):
-            video_ids.append(item["contentDetails"]["videoId"])
+            vid = item["contentDetails"]["videoId"]
+            # 이미 수집된 영상이면 여기서 멈춤 (최신순이니까 이후는 다 수집됨)
+            if known_video_ids and vid in known_video_ids:
+                stop_early = True
+                break
+            video_ids.append(vid)
+
+        if stop_early:
+            break
 
         next_page = resp.get("nextPageToken")
         if not next_page:
@@ -251,7 +261,14 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
     db.flush()
 
     try:
-        videos = _fetch_channel_videos(channel.youtube_channel_id)
+        # 이미 수집된 영상 ID 목록 (레퍼런스 + 검증 큐)
+        existing_refs = {r.youtube_video_id for r in
+            db.query(SongReference.youtube_video_id).filter(SongReference.channel_id == channel.id).all()}
+        existing_reviews = {r.youtube_video_id for r in
+            db.query(ReviewQueue.youtube_video_id).filter(ReviewQueue.channel_id == channel.id).all()}
+        known_ids = existing_refs | existing_reviews
+
+        videos = _fetch_channel_videos(channel.youtube_channel_id, known_video_ids=known_ids)
         log.videos_found = len(videos)
 
         songs_added = 0
