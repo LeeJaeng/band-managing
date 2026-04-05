@@ -29,6 +29,14 @@
 - JWT 인증 (아이디/비번), 역할: ADMIN / MEMBER
 - 읽기 API는 공개 (콘티 공유 링크 지원)
 
+### 인증/권한
+- JWT 인증 (아이디/비번), 역할: ADMIN / MEMBER
+- 읽기 API는 공개 (콘티 공유 링크 지원)
+- 곡 등록: 관리자 → 정식곡(MANUAL), 일반유저 → 임시곡(USER, user_id 연결)
+- 곡 목록: 정식곡 + 본인 임시곡만 표시
+- 곡 삭제/병합: 관리자만
+- 콘티: 본인 콘티만 표시 (user_id 필터)
+
 ### 코드 컨벤션
 - API: FastAPI 라우터, SQLAlchemy ORM, Pydantic 스키마
 - Web: `<script setup lang="ts">`, Composition API, file-based routing
