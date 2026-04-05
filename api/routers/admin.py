@@ -126,6 +126,22 @@ def delete_channel(channel_id: str, _: User = Depends(require_admin), db: Sessio
 
 # ── Crawl trigger ──────────────────────────────────────
 
+@router.post("/crawl/all")
+def crawl_all(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """활성화된 모든 채널 크롤링."""
+    channels = db.query(CrawlChannel).filter(CrawlChannel.is_active == True).all()
+    results = []
+    from crawler import crawl_channel as do_crawl
+    for ch in channels:
+        try:
+            result = do_crawl(ch, db)
+        except Exception as e:
+            db.rollback()
+            result = {"channel_id": ch.id, "channel_name": ch.name, "status": "FAILED", "error": str(e), "videos_found": 0, "refs_added": 0}
+        results.append(result)
+    return {"channels_crawled": len(results), "results": results}
+
+
 @router.post("/crawl/{channel_id}")
 def crawl_channel(channel_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """특정 채널 크롤링 실행 (동기식 — MVP)."""
@@ -147,18 +163,6 @@ def crawl_channel(channel_id: str, _: User = Depends(require_admin), db: Session
             "videos_found": 0,
             "refs_added": 0,
         }
-
-
-@router.post("/crawl/all")
-def crawl_all(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """활성화된 모든 채널 크롤링."""
-    channels = db.query(CrawlChannel).filter(CrawlChannel.is_active == True).all()
-    results = []
-    from crawler import crawl_channel as do_crawl
-    for ch in channels:
-        result = do_crawl(ch, db)
-        results.append(result)
-    return {"channels_crawled": len(results), "results": results}
 
 
 # ── Crawl logs ─────────────────────────────────────────
