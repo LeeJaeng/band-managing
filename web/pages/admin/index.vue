@@ -269,6 +269,15 @@ async function rejectReview(rq: any) {
   await load()
 }
 
+async function autoApproveAll() {
+  if (!confirm(`검증 큐 ${reviewQueue.value.length}개 항목을 자동 승인하시겠습니까?\n(애매한 항목은 남겨둡니다)`)) return
+  try {
+    const result = await api<any>(`/api/admin/review/auto-approve`, { method: 'POST' })
+    alert(`자동 승인 완료!\n승인: ${result.auto_approved}개\n애매해서 남김: ${result.skipped_ambiguous}개`)
+    await load()
+  } catch (e: any) { alert(e.message || '자동 승인 실패') }
+}
+
 async function exportReviewQueue() {
   try {
     const data = await api<any>(`/api/admin/review-queue/export?_t=${Date.now()}`)
@@ -436,7 +445,10 @@ onMounted(load)
       <section class="section">
         <div class="section-header">
           <h2>검증 큐 ({{ reviewQueue.length }})</h2>
-          <button v-if="reviewQueue.length > 0" class="btn" @click="exportReviewQueue">Claude Code로 내보내기</button>
+          <div v-if="reviewQueue.length > 0" class="section-actions">
+            <button class="btn-accent" @click="autoApproveAll">자동 승인</button>
+            <button class="btn" @click="exportReviewQueue">내보내기</button>
+          </div>
         </div>
         <div v-if="reviewQueue.length === 0" class="empty">대기 중인 항목 없음</div>
         <div v-for="rq in reviewQueue" :key="rq.id" class="review-card">

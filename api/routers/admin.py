@@ -271,6 +271,90 @@ def export_review_queue(_: User = Depends(require_admin), db: Session = Depends(
     return {"text": "\n".join(lines), "count": len(items)}
 
 
+@router.post("/review/auto-approve")
+def auto_approve_review_queue(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """검증 큐 자동 승인: 깔끔한 것은 자동 등록, 애매한 것만 남김."""
+    import re
+
+    items = db.query(ReviewQueue).filter(ReviewQueue.status == "PENDING").all()
+
+    auto_approved = 0
+    auto_rejected = 0
+    skipped = 0  # 애매해서 남긴 것
+
+    for rq in items:
+        title = rq.parsed_song_title or ""
+
+        # 애매한 것 판단 — PENDING으로 남김
+        is_ambiguous = False
+
+        # 1) 파싱된 제목이 없거나 너무 짧음
+        if len(title.strip()) < 2:
+            is_ambiguous = True
+        # 2) 제목이 너무 김 (보통 곡 제목은 30자 이내)
+        elif len(title) > 40:
+            is_ambiguous = True
+        # 3) 영어+한글 섞인 긴 설명형 제목
+        elif title.count(" ") > 6:
+            is_ambiguous = True
+        # 4) 숫자만 있거나 의미 없는 제목
+        elif re.match(r'^[\d\s\-\.]+$', title):
+            is_ambiguous = True
+
+        if is_ambiguous:
+            skipped += 1
+            continue
+
+        # DB에 같은 곡 있는지 확인
+        existing = db.query(Song).filter(Song.title == title).first()
+
+        if existing:
+            # 같은 곡 있으면 레퍼런스만 추가
+            # 이미 같은 video_id 레퍼런스 있으면 스킵
+            existing_ref = db.query(SongReference).filter(
+                SongReference.youtube_video_id == rq.youtube_video_id
+            ).first()
+            if not existing_ref:
+                ref = SongReference(
+                    song_id=existing.id,
+                    youtube_url=rq.youtube_url,
+                    youtube_video_id=rq.youtube_video_id,
+                    title=rq.video_title,
+                    channel_id=rq.channel_id,
+                    trust_level="HIGH",
+                    source="CRAWL",
+                )
+                db.add(ref)
+        else:
+            # 새 곡 등록
+            song = Song(title=title, source="CRAWLED")
+            db.add(song)
+            db.flush()
+
+            ref = SongReference(
+                song_id=song.id,
+                youtube_url=rq.youtube_url,
+                youtube_video_id=rq.youtube_video_id,
+                title=rq.video_title,
+                channel_id=rq.channel_id,
+                trust_level="HIGH",
+                source="CRAWL",
+            )
+            db.add(ref)
+
+        rq.status = "APPROVED"
+        rq.reviewed_at = datetime.utcnow()
+        auto_approved += 1
+
+    db.commit()
+
+    return {
+        "total": len(items),
+        "auto_approved": auto_approved,
+        "skipped_ambiguous": skipped,
+    }
+
+
 @router.post("/review/batch")
 def batch_review(body: dict, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """검증 큐 일괄 처리. body: {"actions": [{"review_id": "...", "action": "approve|reject", "song_id": "...", "song_title": "..."}]}"""
