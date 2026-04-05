@@ -188,7 +188,7 @@ def _fetch_channel_videos(channel_id_or_handle: str, known_video_ids: set[str] |
     next_page = None
     stop_early = False
 
-    for _ in range(5):  # 최대 5페이지 (250개)
+    while True:  # 페이지 제한 없이 전체 수집
         req = youtube.playlistItems().list(
             playlistId=uploads_playlist_id,
             part="contentDetails",
