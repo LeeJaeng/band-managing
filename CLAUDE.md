@@ -57,6 +57,14 @@ DATABASE_URL=sqlite:///./test.db pytest tests/ -v
 - python-jose[cryptography]는 cffi 빌드 필요 (Dockerfile에 gcc, libffi-dev)
 - 새 패키지 추가 시 Dockerfile 빌드 의존성도 확인
 
+### push 전 필수 체크리스트
+1. **백엔드 테스트**: `DATABASE_URL=sqlite:///./test.db pytest tests/ -v` 전체 통과
+2. **의존성 호환성**: 새 패키지 추가 시 pip install + import 테스트
+3. **프론트엔드 확인**: 모든 페이지의 API 호출에 에러 처리(catch) 있는지
+4. **모바일 레이아웃**: 네비, 폼, 카드가 640px 이하에서 깨지지 않는지
+5. **API 에러 전파**: load() 함수에서 하나의 API 실패가 전체를 멈추지 않는지
+6. **인증 흐름**: 로그인 필요한 페이지가 미인증 시 /login으로 리다이렉트 되는지
+
 ### DB
 - PostgreSQL 16, 연결: 환경변수 `DATABASE_URL`
 - ORM: SQLAlchemy, 모델: `api/models.py`

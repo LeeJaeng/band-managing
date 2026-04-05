@@ -52,15 +52,21 @@ onMounted(async () => {
 
 .nav-links {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
 
   a {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-dim);
+    white-space: nowrap;
     transition: color .15s;
     &:hover, &.router-link-active { color: var(--text); }
+  }
+
+  @media (max-width: 640px) {
+    gap: 10px;
+    a, .nav-user, .nav-logout { font-size: 12px; }
   }
 }
 

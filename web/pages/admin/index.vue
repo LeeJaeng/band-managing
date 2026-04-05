@@ -75,18 +75,22 @@ const resolving = ref(false)
 async function load() {
   loading.value = true
   const t = Date.now()
+  try {
   const [ch, lg, rq, mb, us] = await Promise.all([
-    api<any[]>(`/api/admin/channels?_t=${t}`),
-    api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`),
-    api<any[]>(`/api/admin/review-queue?status=PENDING&_t=${t}`),
-    api<any>(`/api/team/members?_t=${t}`),
-    api<any>(`/api/songs?source=USER&_t=${t}`),
+    api<any[]>(`/api/admin/channels?_t=${t}`).catch(() => []),
+    api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`).catch(() => []),
+    api<any[]>(`/api/admin/review-queue?status=PENDING&_t=${t}`).catch(() => []),
+    api<any>(`/api/team/members?_t=${t}`).catch(() => ({ items: [] })),
+    api<any>(`/api/songs?source=USER&_t=${t}`).catch(() => ({ items: [] })),
   ])
   channels.value = ch
   logs.value = lg
   reviewQueue.value = rq
   members.value = mb.items || []
   userSongs.value = us.items || []
+  } catch (e: any) {
+    console.error('load error:', e)
+  }
   loading.value = false
 }
 
