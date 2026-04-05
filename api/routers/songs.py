@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from db import get_db
 from models import Song, SongReference, SongSheet, User
-from auth import get_current_user, get_current_user_optional
+from auth import get_current_user, get_current_user_optional, require_admin
 
 router = APIRouter(prefix="/api/songs", tags=["songs"])
 
@@ -160,7 +160,7 @@ def update_song(song_id: str, body: SongUpdate, _: User = Depends(get_current_us
 
 
 @router.delete("/{song_id}")
-def delete_song(song_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_song(song_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
@@ -177,7 +177,7 @@ def delete_song(song_id: str, _: User = Depends(get_current_user), db: Session =
 
 
 @router.post("/merge")
-def merge_songs(source_id: str, target_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def merge_songs(source_id: str, target_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """source 곡의 레퍼런스/악보를 target으로 옮기고 source 삭제."""
     source = db.query(Song).filter(Song.id == source_id).first()
     target = db.query(Song).filter(Song.id == target_id).first()

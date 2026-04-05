@@ -2,6 +2,7 @@
 const route = useRoute()
 const router = useRouter()
 const { api } = useApi()
+const { isAdmin } = useAuth()
 
 const song = ref<any>(null)
 const loading = ref(true)
@@ -144,7 +145,7 @@ onMounted(load)
         </div>
         <div class="header-actions">
           <button class="btn" @click="startEdit" v-if="!editing">편집</button>
-          <button class="btn-sm danger" @click="deleteSong">삭제</button>
+          <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong">삭제</button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { api } = useApi()
+const { isAdmin } = useAuth()
 
 const songs = ref<any[]>([])
 const query = ref('')
@@ -59,7 +60,7 @@ onMounted(search)
             <span class="ref-count">레퍼런스 {{ s.ref_count || 0 }}개</span>
           </div>
         </NuxtLink>
-        <button class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
+        <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
       </div>
     </div>
   </div>
