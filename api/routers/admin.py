@@ -465,15 +465,23 @@ def reset_crawl_data(_: User = Depends(require_admin), db: Session = Depends(get
     # 순서 중요 (FK 의존성)
     db.query(ContiItem).delete()
     db.query(SongSheet).delete()
-    db.query(SongReference).delete()
-    db.query(ReviewQueue).delete()
-    db.query(CrawlLog).delete()
-    db.query(Song).delete()
+    ref_count = db.query(SongReference).delete()
+    rq_count = db.query(ReviewQueue).delete()
+    log_count = db.query(CrawlLog).delete()
+    song_count = db.query(Song).delete()
     # 채널의 last_crawled_at 초기화
     db.query(CrawlChannel).update({"last_crawled_at": None}, synchronize_session="fetch")
 
     db.commit()
-    return {"ok": True}
+    return {
+        "ok": True,
+        "deleted": {
+            "songs": song_count,
+            "references": ref_count,
+            "review_queue": rq_count,
+            "crawl_logs": log_count,
+        },
+    }
 
 
 @router.put("/songs/{song_id}/source")

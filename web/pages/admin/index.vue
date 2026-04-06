@@ -224,14 +224,21 @@ async function crawlAll() {
   await load()
 }
 
+function removeRq(id: string) {
+  const idx = reviewQueue.value.findIndex(r => r.id === id)
+  if (idx >= 0) reviewQueue.value.splice(idx, 1)
+}
+
 async function approveAsNew(rq: any) {
+  const title = (rq.parsed_song_title || '').trim()
+  if (!title) { alert('곡 제목을 입력해주세요.'); return }
   try {
     await api(`/api/admin/review/${rq.id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ song_title: rq.parsed_song_title }),
+      body: JSON.stringify({ song_title: title }),
     })
+    removeRq(rq.id)
   } catch (e: any) { alert(e.message || '승인 실패') }
-  await load()
 }
 
 async function approveWithSong(rq: any, songId: string) {
@@ -240,8 +247,25 @@ async function approveWithSong(rq: any, songId: string) {
       method: 'POST',
       body: JSON.stringify({ song_id: songId }),
     })
+    removeRq(rq.id)
   } catch (e: any) { alert(e.message || '승인 실패') }
-  await load()
+}
+
+// 기존곡 검색 (row별)
+const searchCache = ref<Record<string, any[]>>({})
+const searchBusy = ref<Record<string, boolean>>({})
+
+async function searchSongs(rq: any) {
+  const q = (rq.search_query || '').trim()
+  if (!q) { searchCache.value[rq.id] = []; return }
+  searchBusy.value[rq.id] = true
+  try {
+    const res = await api<any>(`/api/songs?q=${encodeURIComponent(q)}&limit=10&_t=${Date.now()}`)
+    searchCache.value[rq.id] = res.items || []
+  } catch (e: any) {
+    searchCache.value[rq.id] = []
+  }
+  searchBusy.value[rq.id] = false
 }
 
 async function approveUserSong(song: any) {
@@ -274,8 +298,8 @@ async function resetCrawlData() {
 async function rejectReview(rq: any) {
   try {
     await api(`/api/admin/review/${rq.id}/reject`, { method: 'POST' })
+    removeRq(rq.id)
   } catch (e: any) { alert(e.message || '거부 실패') }
-  await load()
 }
 
 async function autoApproveAll() {
@@ -462,10 +486,26 @@ onMounted(load)
         </div>
         <div v-if="reviewQueue.length === 0" class="empty">대기 중인 항목 없음</div>
         <div v-for="rq in reviewQueue" :key="rq.id" class="review-card">
+          <div class="rv-video" v-if="rq.youtube_video_id">
+            <iframe
+              :src="`https://www.youtube.com/embed/${rq.youtube_video_id}`"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            />
+          </div>
           <div class="rv-info">
             <div class="rv-title">{{ rq.video_title }}</div>
-            <div class="rv-parsed">파싱된 곡명: <strong>{{ rq.parsed_song_title || '(없음)' }}</strong></div>
-            <a :href="rq.youtube_url" target="_blank" class="rv-link">유튜브에서 보기</a>
+            <div class="rv-parsed-row">
+              <label>파싱된 곡명</label>
+              <input
+                v-model="rq.parsed_song_title"
+                type="text"
+                class="rv-title-input"
+                placeholder="곡 제목을 입력하세요"
+              />
+            </div>
+            <a :href="rq.youtube_url" target="_blank" class="rv-link">유튜브에서 보기 ↗</a>
 
             <!-- 유사곡 후보 -->
             <div v-if="(rq.candidates || []).length > 0" class="rv-candidates">
@@ -473,6 +513,31 @@ onMounted(load)
               <div v-for="c in rq.candidates" :key="c.id" class="candidate-item">
                 <span>{{ c.title }}</span>
                 <button class="btn-xs approve" @click="approveWithSong(rq, c.id)">이 곡에 추가</button>
+              </div>
+            </div>
+
+            <!-- 기존곡 검색 -->
+            <div class="rv-search">
+              <div class="rv-search-row">
+                <input
+                  v-model="rq.search_query"
+                  type="text"
+                  class="rv-search-input"
+                  placeholder="기존 곡 검색..."
+                  @keyup.enter="searchSongs(rq)"
+                />
+                <button class="btn-xs" @click="searchSongs(rq)" :disabled="searchBusy[rq.id]">
+                  {{ searchBusy[rq.id] ? '...' : '검색' }}
+                </button>
+              </div>
+              <div v-if="searchCache[rq.id] && searchCache[rq.id].length > 0" class="rv-search-results">
+                <div v-for="s in searchCache[rq.id]" :key="s.id" class="candidate-item">
+                  <span>{{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span></span>
+                  <button class="btn-xs approve" @click="approveWithSong(rq, s.id)">이 곡에 추가</button>
+                </div>
+              </div>
+              <div v-else-if="searchCache[rq.id] && searchCache[rq.id].length === 0" class="rv-search-empty">
+                검색 결과 없음
               </div>
             </div>
           </div>
@@ -590,14 +655,62 @@ label {
 .review-card {
   @include card; padding: 14px 16px;
   display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 8px; gap: 12px;
+  margin-bottom: 8px; gap: 14px;
 }
 
-.rv-info { flex: 1; min-width: 0; }
-.rv-title { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
-.rv-parsed { font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
-.rv-link { font-size: 12px; color: var(--accent); &:hover { text-decoration: underline; } }
+.rv-video {
+  flex-shrink: 0;
+  width: 320px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+
+  iframe { width: 100%; height: 100%; border: 0; }
+}
+
+.rv-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.rv-title { font-weight: 600; word-break: break-word; font-size: 14px; }
+
+.rv-parsed-row {
+  display: flex; flex-direction: column; gap: 4px;
+  label { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+}
+.rv-title-input {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  &:focus { outline: none; border-color: var(--accent); }
+}
+
+.rv-link { font-size: 12px; color: var(--accent); align-self: flex-start; &:hover { text-decoration: underline; } }
 .rv-actions { display: flex; gap: 6px; flex-shrink: 0; flex-direction: column; }
+
+.rv-search {
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.rv-search-row { display: flex; gap: 6px; }
+.rv-search-input {
+  flex: 1; min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  &:focus { outline: none; border-color: var(--accent); }
+}
+.rv-search-results { margin-top: 6px; display: flex; flex-direction: column; }
+.rv-search-empty { margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+.rv-artist { color: var(--text-dim); font-size: 12px; }
 
 .rv-candidates {
   margin-top: 8px;
@@ -721,7 +834,9 @@ label {
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
-  .review-card { flex-direction: column; align-items: flex-start; }
+  .review-card { flex-direction: column; align-items: stretch; }
+  .rv-video { width: 100%; }
+  .rv-actions { flex-direction: row; }
   .url-row { flex-direction: column; }
 }
 </style>
