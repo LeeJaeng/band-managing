@@ -22,7 +22,7 @@ def test_create_song_requires_auth(client):
 def test_list_songs(client, member_headers):
     client.post("/api/songs", json={"title": "곡A"}, headers=member_headers)
     client.post("/api/songs", json={"title": "곡B"}, headers=member_headers)
-    resp = client.get("/api/songs")
+    resp = client.get("/api/songs", headers=member_headers)
     assert resp.status_code == 200
     assert resp.json()["total"] == 2
 
@@ -31,7 +31,7 @@ def test_search_songs(client, member_headers):
     client.post("/api/songs", json={"title": "은혜", "lyrics": "놀라운 은혜"}, headers=member_headers)
     client.post("/api/songs", json={"title": "감사"}, headers=member_headers)
 
-    resp = client.get("/api/songs?q=은혜")
+    resp = client.get("/api/songs?q=은혜", headers=member_headers)
     assert resp.json()["total"] == 1
     assert resp.json()["items"][0]["title"] == "은혜"
 
@@ -55,11 +55,11 @@ def test_update_song(client, member_headers):
     assert resp.json()["title"] == "수정제목"
 
 
-def test_delete_song(client, member_headers):
-    create = client.post("/api/songs", json={"title": "삭제할곡"}, headers=member_headers)
+def test_delete_song(client, admin_headers):
+    create = client.post("/api/songs", json={"title": "삭제할곡"}, headers=admin_headers)
     song_id = create.json()["id"]
 
-    resp = client.delete(f"/api/songs/{song_id}", headers=member_headers)
+    resp = client.delete(f"/api/songs/{song_id}", headers=admin_headers)
     assert resp.json()["ok"] is True
 
     resp = client.get(f"/api/songs/{song_id}")
@@ -149,17 +149,17 @@ def test_list_sheets(client, member_headers):
 
 # ── Merge ──────────────────────────────────────────────
 
-def test_merge_songs(client, member_headers):
-    s1 = client.post("/api/songs", json={"title": "곡 원본"}, headers=member_headers).json()
-    s2 = client.post("/api/songs", json={"title": "곡 중복"}, headers=member_headers).json()
+def test_merge_songs(client, admin_headers):
+    s1 = client.post("/api/songs", json={"title": "곡 원본"}, headers=admin_headers).json()
+    s2 = client.post("/api/songs", json={"title": "곡 중복"}, headers=admin_headers).json()
 
     client.post(f"/api/songs/{s2['id']}/references", json={
         "youtube_url": "https://youtube.com/watch?v=merge1",
         "youtube_video_id": "merge1",
         "title": "중복 레퍼런스",
-    }, headers=member_headers)
+    }, headers=admin_headers)
 
-    resp = client.post(f"/api/songs/merge?source_id={s2['id']}&target_id={s1['id']}", headers=member_headers)
+    resp = client.post(f"/api/songs/merge?source_id={s2['id']}&target_id={s1['id']}", headers=admin_headers)
     assert resp.json()["ok"] is True
 
     # source 삭제됨
