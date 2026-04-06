@@ -195,18 +195,17 @@ def list_crawl_logs(
 @router.get("/review-queue")
 def list_review_queue(
     status: str = Query(default="PENDING"),
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0, ge=0),
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    items = (
-        db.query(ReviewQueue)
-        .filter(ReviewQueue.status == status)
-        .order_by(ReviewQueue.created_at.desc())
-        .all()
-    )
+    q = db.query(ReviewQueue).filter(ReviewQueue.status == status)
+    total = q.count()
+    items = q.order_by(ReviewQueue.created_at.asc()).offset(offset).limit(limit).all()
+
     result = []
     for rq in items:
-        # 파싱된 제목으로 유사곡 검색
         candidates = []
         if rq.parsed_song_title:
             like = f"%{rq.parsed_song_title}%"
@@ -225,7 +224,7 @@ def list_review_queue(
             "created_at": rq.created_at.isoformat() if rq.created_at else None,
             "candidates": candidates,
         })
-    return result
+    return {"total": total, "items": result}
 
 
 @router.get("/review-queue/export")

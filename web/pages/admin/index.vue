@@ -5,6 +5,8 @@ const { api } = useApi()
 const channels = ref<any[]>([])
 const logs = ref<any[]>([])
 const reviewQueue = ref<any[]>([])
+const rqTotal = ref(0)
+const rqFetching = ref(false)
 const members = ref<any[]>([])
 const userSongs = ref<any[]>([])
 const loading = ref(true)
@@ -72,22 +74,43 @@ const editingChannelId = ref<string | null>(null)
 const channelForm = ref({ name: '', youtube_channel_url: '', youtube_channel_id: '', trust_level: 'HIGH' })
 const resolving = ref(false)
 
+async function loadReviewQueue() {
+  const res = await api<any>(`/api/admin/review-queue?status=PENDING&limit=10&offset=0&_t=${Date.now()}`).catch(() => ({ total: 0, items: [] }))
+  rqTotal.value = res.total ?? 0
+  reviewQueue.value = res.items ?? []
+}
+
+async function refillQueue() {
+  if (rqFetching.value) return
+  if (reviewQueue.value.length >= 10) return
+  if (reviewQueue.value.length >= rqTotal.value) return
+  rqFetching.value = true
+  try {
+    const existing = new Set(reviewQueue.value.map((r: any) => r.id))
+    const res = await api<any>(`/api/admin/review-queue?status=PENDING&limit=10&offset=0&_t=${Date.now()}`)
+    rqTotal.value = res.total ?? 0
+    const newItems = (res.items ?? []).filter((r: any) => !existing.has(r.id))
+    const needed = 10 - reviewQueue.value.length
+    reviewQueue.value.push(...newItems.slice(0, needed))
+  } catch {}
+  rqFetching.value = false
+}
+
 async function load() {
   loading.value = true
   const t = Date.now()
   try {
-  const [ch, lg, rq, mb, us] = await Promise.all([
+  const [ch, lg, mb, us] = await Promise.all([
     api<any[]>(`/api/admin/channels?_t=${t}`).catch(() => []),
     api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`).catch(() => []),
-    api<any[]>(`/api/admin/review-queue?status=PENDING&_t=${t}`).catch(() => []),
     api<any>(`/api/team/members?_t=${t}`).catch(() => ({ items: [] })),
     api<any>(`/api/songs?source=USER&_t=${t}`).catch(() => ({ items: [] })),
   ])
   channels.value = ch
   logs.value = lg
-  reviewQueue.value = rq
   members.value = mb.items || []
   userSongs.value = us.items || []
+  await loadReviewQueue()
   } catch (e: any) {
     console.error('load error:', e)
   }
@@ -226,7 +249,11 @@ async function crawlAll() {
 
 function removeRq(id: string) {
   const idx = reviewQueue.value.findIndex(r => r.id === id)
-  if (idx >= 0) reviewQueue.value.splice(idx, 1)
+  if (idx >= 0) {
+    reviewQueue.value.splice(idx, 1)
+    rqTotal.value = Math.max(0, rqTotal.value - 1)
+  }
+  refillQueue()
 }
 
 async function approveAsNew(rq: any) {
@@ -303,7 +330,7 @@ async function rejectReview(rq: any) {
 }
 
 async function autoApproveAll() {
-  if (!confirm(`검증 큐 ${reviewQueue.value.length}개 항목을 자동 승인하시겠습니까?\n(애매한 항목은 남겨둡니다)`)) return
+  if (!confirm(`검증 큐 ${rqTotal.value}개 항목을 자동 승인하시겠습니까?\n(애매한 항목은 남겨둡니다)`)) return
   try {
     const result = await api<any>(`/api/admin/review/auto-approve`, { method: 'POST' })
     alert(`자동 승인 완료!\n승인: ${result.auto_approved}개\n애매해서 남김: ${result.skipped_ambiguous}개`)
@@ -478,13 +505,14 @@ onMounted(load)
       <!-- 검증 큐 -->
       <section class="section">
         <div class="section-header">
-          <h2>검증 큐 ({{ reviewQueue.length }})</h2>
-          <div v-if="reviewQueue.length > 0" class="section-actions">
+          <h2>검증 큐 ({{ reviewQueue.length }} / {{ rqTotal }})</h2>
+          <div v-if="rqTotal > 0" class="section-actions">
             <button class="btn-accent" @click="autoApproveAll">자동 승인</button>
             <button class="btn" @click="exportReviewQueue">내보내기</button>
           </div>
         </div>
-        <div v-if="reviewQueue.length === 0" class="empty">대기 중인 항목 없음</div>
+        <div v-if="rqTotal === 0" class="empty">대기 중인 항목 없음</div>
+        <div v-if="rqFetching" class="rq-loading">불러오는 중...</div>
         <div v-for="rq in reviewQueue" :key="rq.id" class="review-card">
           <div class="rv-video" v-if="rq.youtube_video_id">
             <iframe
@@ -830,7 +858,7 @@ label {
 
 .member-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
-.loading, .empty { text-align: center; padding: 20px; color: var(--text-dim); }
+.loading, .empty, .rq-loading { text-align: center; padding: 20px; color: var(--text-dim); }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
