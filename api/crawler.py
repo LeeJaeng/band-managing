@@ -10,7 +10,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from models import CrawlChannel, CrawlLog, Song, SongReference, ReviewQueue
+from models import CrawlChannel, CrawlLog, Song, SongReference, ReviewQueue, CrawlFilterKeyword
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
@@ -108,13 +108,16 @@ def detect_key(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def should_skip_video(title: str) -> bool:
+def should_skip_video(title: str, extra_keywords: list[str] | None = None) -> bool:
     """예배 실황, 연주, inst, 합쳐진 곡 등 스킵해야 할 영상인지 확인."""
     lower = title.lower()
     for kw in SKIP_KEYWORDS:
         if kw.lower() in lower:
             return True
     for kw in SKIP_TYPE_KEYWORDS:
+        if kw.lower() in lower:
+            return True
+    for kw in (extra_keywords or []):
         if kw.lower() in lower:
             return True
     # 곡 두 개 이상 합쳐진 영상
@@ -279,6 +282,9 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
         videos = _fetch_channel_videos(channel.youtube_channel_id, known_video_ids=known_ids)
         log.videos_found = len(videos)
 
+        # DB에 등록된 추가 필터 키워드 로드
+        extra_keywords = [r.keyword for r in db.query(CrawlFilterKeyword).all()]
+
         songs_added = 0
         refs_added = 0
 
@@ -294,6 +300,10 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
                 ReviewQueue.youtube_video_id == video["video_id"]
             ).first()
             if existing_review:
+                continue
+
+            # DB 추가 필터 키워드 체크
+            if extra_keywords and should_skip_video(video["title"], extra_keywords):
                 continue
 
             parsed_title = parse_song_title(video["title"])

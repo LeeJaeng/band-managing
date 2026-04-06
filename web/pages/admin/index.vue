@@ -9,8 +9,70 @@ const rqTotal = ref(0)
 const rqFetching = ref(false)
 const members = ref<any[]>([])
 const userSongs = ref<any[]>([])
+const filterKeywords = ref<any[]>([])
+const newKeyword = ref('')
 const loading = ref(true)
 const crawling = ref(false)
+
+// 곡 병합
+const mergeSourceQuery = ref('')
+const mergeSourceResults = ref<any[]>([])
+const mergeSource = ref<any | null>(null)
+const mergeTargetQuery = ref('')
+const mergeTargetResults = ref<any[]>([])
+const mergeTarget = ref<any | null>(null)
+const mergeBusy = ref(false)
+
+async function searchMergeSongs(q: string, resultRef: typeof mergeSourceResults) {
+  if (!q.trim()) { resultRef.value = []; return }
+  const res = await api<any>(`/api/songs?q=${encodeURIComponent(q)}&limit=10&_t=${Date.now()}`).catch(() => ({ items: [] }))
+  resultRef.value = res.items || []
+}
+
+const mergeSourceTimers = { t: 0 as any }
+const mergeTargetTimers = { t: 0 as any }
+
+function onMergeSourceInput() {
+  clearTimeout(mergeSourceTimers.t)
+  mergeSource.value = null
+  mergeSourceTimers.t = setTimeout(() => searchMergeSongs(mergeSourceQuery.value, mergeSourceResults), 350)
+}
+
+function onMergeTargetInput() {
+  clearTimeout(mergeTargetTimers.t)
+  mergeTarget.value = null
+  mergeTargetTimers.t = setTimeout(() => searchMergeSongs(mergeTargetQuery.value, mergeTargetResults), 350)
+}
+
+async function doMerge() {
+  if (!mergeSource.value || !mergeTarget.value) { alert('두 곡을 모두 선택해주세요.'); return }
+  if (mergeSource.value.id === mergeTarget.value.id) { alert('같은 곡입니다.'); return }
+  if (!confirm(`"${mergeSource.value.title}"을 "${mergeTarget.value.title}"에 병합하고 원본을 삭제하시겠습니까?`)) return
+  mergeBusy.value = true
+  try {
+    await api(`/api/admin/songs/merge?source_id=${mergeSource.value.id}&target_id=${mergeTarget.value.id}`, { method: 'POST' })
+    alert('병합 완료!')
+    mergeSourceQuery.value = ''; mergeSource.value = null; mergeSourceResults.value = []
+    mergeTargetQuery.value = ''; mergeTarget.value = null; mergeTargetResults.value = []
+  } catch (e: any) { alert(e.message || '병합 실패') }
+  mergeBusy.value = false
+}
+
+// 제목 입력 자동 검색 (검증 큐)
+const titleSearchCache = ref<Record<string, any[]>>({})
+const titleSearchTimers = {} as Record<string, ReturnType<typeof setTimeout>>
+
+async function titleSearch(rq: any) {
+  const q = (rq.parsed_song_title || '').trim()
+  if (!q) { titleSearchCache.value[rq.id] = []; return }
+  const res = await api<any>(`/api/songs?q=${encodeURIComponent(q)}&limit=5&_t=${Date.now()}`).catch(() => ({ items: [] }))
+  titleSearchCache.value[rq.id] = res.items || []
+}
+
+function onTitleInput(rq: any) {
+  clearTimeout(titleSearchTimers[rq.id])
+  titleSearchTimers[rq.id] = setTimeout(() => titleSearch(rq), 400)
+}
 
 // 팀원 관리
 const POSITIONS = ['피아노', '신디', '드럼', '베이스', '보컬', '기타', '어쿠스틱', '기타(일렉)']
@@ -100,16 +162,18 @@ async function load() {
   loading.value = true
   const t = Date.now()
   try {
-  const [ch, lg, mb, us] = await Promise.all([
+  const [ch, lg, mb, us, fk] = await Promise.all([
     api<any[]>(`/api/admin/channels?_t=${t}`).catch(() => []),
     api<any[]>(`/api/admin/crawl/logs?limit=10&_t=${t}`).catch(() => []),
     api<any>(`/api/team/members?_t=${t}`).catch(() => ({ items: [] })),
     api<any>(`/api/songs?source=USER&_t=${t}`).catch(() => ({ items: [] })),
+    api<any[]>(`/api/admin/filter-keywords?_t=${t}`).catch(() => []),
   ])
   channels.value = ch
   logs.value = lg
   members.value = mb.items || []
   userSongs.value = us.items || []
+  filterKeywords.value = fk
   await loadReviewQueue()
   } catch (e: any) {
     console.error('load error:', e)
@@ -310,6 +374,23 @@ async function deleteUserSong(song: any) {
   try {
     await api(`/api/songs/${song.id}`, { method: 'DELETE' })
     await load()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
+async function addFilterKeyword() {
+  const kw = newKeyword.value.trim()
+  if (!kw) return
+  try {
+    const item = await api<any>('/api/admin/filter-keywords', { method: 'POST', body: JSON.stringify({ keyword: kw }) })
+    filterKeywords.value.push(item)
+    newKeyword.value = ''
+  } catch (e: any) { alert(e.message || '추가 실패') }
+}
+
+async function deleteFilterKeyword(kw: any) {
+  try {
+    await api(`/api/admin/filter-keywords/${kw.id}`, { method: 'DELETE' })
+    filterKeywords.value = filterKeywords.value.filter(k => k.id !== kw.id)
   } catch (e: any) { alert(e.message || '삭제 실패') }
 }
 
@@ -531,11 +612,22 @@ onMounted(load)
                 type="text"
                 class="rv-title-input"
                 placeholder="곡 제목을 입력하세요"
+                @input="onTitleInput(rq)"
               />
             </div>
+
+            <!-- 제목 자동 검색 결과 -->
+            <div v-if="titleSearchCache[rq.id] && titleSearchCache[rq.id].length > 0" class="rv-candidates rv-title-matches">
+              <div class="rv-candidates-label">곡명이 같은 곡이 이미 있어요:</div>
+              <div v-for="s in titleSearchCache[rq.id]" :key="s.id" class="candidate-item">
+                <span>{{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span></span>
+                <button class="btn-xs approve" @click="approveWithSong(rq, s.id)">이 곡에 추가</button>
+              </div>
+            </div>
+
             <a :href="rq.youtube_url" target="_blank" class="rv-link">유튜브에서 보기 ↗</a>
 
-            <!-- 유사곡 후보 -->
+            <!-- 유사곡 후보 (서버 제공) -->
             <div v-if="(rq.candidates || []).length > 0" class="rv-candidates">
               <div class="rv-candidates-label">비슷한 곡이 DB에 있어요:</div>
               <div v-for="c in rq.candidates" :key="c.id" class="candidate-item">
@@ -589,6 +681,55 @@ onMounted(load)
         <div v-for="log in logs.filter(l => l.error_message)" :key="'err-'+log.id" class="log-error-detail">
           {{ log.error_message }}
         </div>
+      </section>
+
+      <!-- 필터 키워드 관리 -->
+      <section class="section">
+        <h2>크롤링 필터 키워드</h2>
+        <p class="section-desc">영상 제목에 이 단어가 포함되면 크롤링에서 제외됩니다.</p>
+        <div class="keyword-input-row">
+          <input v-model="newKeyword" type="text" class="input-field" placeholder="키워드 추가..." @keyup.enter="addFilterKeyword" />
+          <button class="btn-accent" @click="addFilterKeyword">추가</button>
+        </div>
+        <div v-if="filterKeywords.length === 0" class="empty">등록된 키워드 없음</div>
+        <div class="keyword-list">
+          <div v-for="kw in filterKeywords" :key="kw.id" class="keyword-chip">
+            <span>{{ kw.keyword }}</span>
+            <button @click="deleteFilterKeyword(kw)" class="keyword-delete">✕</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 곡 병합 -->
+      <section class="section">
+        <h2>곡 병합</h2>
+        <p class="section-desc">중복된 곡을 하나로 합칩니다. 원본 곡의 레퍼런스/악보/콘티 항목이 모두 대상 곡으로 이전되고 원본은 삭제됩니다.</p>
+        <div class="merge-grid">
+          <div class="merge-box">
+            <label>삭제할 곡 (원본)</label>
+            <input v-model="mergeSourceQuery" type="text" class="input-field" placeholder="곡 검색..." @input="onMergeSourceInput" />
+            <div v-if="mergeSourceResults.length > 0 && !mergeSource" class="merge-results">
+              <div v-for="s in mergeSourceResults" :key="s.id" class="merge-result-item" @click="() => { mergeSource = s; mergeSourceQuery = s.title; mergeSourceResults = [] }">
+                {{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span>
+              </div>
+            </div>
+            <div v-if="mergeSource" class="merge-selected">선택됨: <strong>{{ mergeSource.title }}</strong></div>
+          </div>
+          <div class="merge-arrow">→</div>
+          <div class="merge-box">
+            <label>남길 곡 (대상)</label>
+            <input v-model="mergeTargetQuery" type="text" class="input-field" placeholder="곡 검색..." @input="onMergeTargetInput" />
+            <div v-if="mergeTargetResults.length > 0 && !mergeTarget" class="merge-results">
+              <div v-for="s in mergeTargetResults" :key="s.id" class="merge-result-item" @click="() => { mergeTarget = s; mergeTargetQuery = s.title; mergeTargetResults = [] }">
+                {{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span>
+              </div>
+            </div>
+            <div v-if="mergeTarget" class="merge-selected">선택됨: <strong>{{ mergeTarget.title }}</strong></div>
+          </div>
+        </div>
+        <button class="btn-accent" @click="doMerge" :disabled="mergeBusy || !mergeSource || !mergeTarget">
+          {{ mergeBusy ? '병합 중...' : '병합 실행' }}
+        </button>
       </section>
     </template>
   </div>
@@ -859,6 +1000,39 @@ label {
 .member-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .loading, .empty, .rq-loading { text-align: center; padding: 20px; color: var(--text-dim); }
+
+.section-desc { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+
+.rv-title-matches { border-color: var(--accent); }
+
+.keyword-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.keyword-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.keyword-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 20px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 13px;
+}
+.keyword-delete {
+  background: none; border: none; cursor: pointer;
+  color: var(--accent); font-size: 12px; padding: 0; line-height: 1;
+  &:hover { color: var(--red); }
+}
+
+.merge-grid {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin-bottom: 12px;
+}
+.merge-box { flex: 1; display: flex; flex-direction: column; gap: 6px; label { font-size: 12px; font-weight: 600; color: var(--text-dim); } }
+.merge-arrow { padding-top: 28px; color: var(--text-dim); font-size: 20px; flex-shrink: 0; }
+.merge-results {
+  @include card; padding: 4px 0; max-height: 160px; overflow-y: auto;
+}
+.merge-result-item {
+  padding: 7px 12px; font-size: 13px; cursor: pointer;
+  &:hover { background: var(--accent-soft); }
+}
+.merge-selected { font-size: 13px; color: var(--text-dim); padding: 4px 0; }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }

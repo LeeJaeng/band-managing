@@ -199,3 +199,11 @@ class ReviewQueue(Base):
     __table_args__ = (
         Index("ix_review_queue_status", "status"),
     )
+
+
+class CrawlFilterKeyword(Base):
+    __tablename__ = "crawl_filter_keywords"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    keyword: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

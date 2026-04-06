@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from db import get_db
-from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference, User
+from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference, SongSheet, ContiItem, User, CrawlFilterKeyword
 from auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -493,3 +493,62 @@ def update_song_source(song_id: str, body: SongSourceUpdate, _: User = Depends(r
         song.user_id = None  # 정식 곡으로 전환 → 소유자 제거
     db.commit()
     return {"ok": True, "source": song.source}
+
+
+# ── 곡 병합 (admin) ─────────────────────────────────────
+
+@router.post("/songs/merge")
+def admin_merge_songs(source_id: str, target_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """source 곡의 레퍼런스/악보/콘티아이템을 target으로 이전하고 source 삭제."""
+    if source_id == target_id:
+        raise HTTPException(400, "source와 target이 같습니다")
+    source = db.query(Song).filter(Song.id == source_id).first()
+    target = db.query(Song).filter(Song.id == target_id).first()
+    if not source:
+        raise HTTPException(404, f"source 곡({source_id})을 찾을 수 없습니다")
+    if not target:
+        raise HTTPException(404, f"target 곡({target_id})을 찾을 수 없습니다")
+
+    db.query(SongReference).filter(SongReference.song_id == source_id).update({"song_id": target_id})
+    db.query(SongSheet).filter(SongSheet.song_id == source_id).update({"song_id": target_id})
+    db.query(ContiItem).filter(ContiItem.song_id == source_id).update({"song_id": target_id})
+    db.delete(source)
+    db.commit()
+    return {"ok": True, "merged_into": target_id, "source_title": source.title, "target_title": target.title}
+
+
+# ── 필터 키워드 관리 ────────────────────────────────────
+
+@router.get("/filter-keywords")
+def list_filter_keywords(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    items = db.query(CrawlFilterKeyword).order_by(CrawlFilterKeyword.created_at.asc()).all()
+    return [{"id": kw.id, "keyword": kw.keyword, "created_at": kw.created_at.isoformat()} for kw in items]
+
+
+class FilterKeywordCreate(BaseModel):
+    keyword: str
+
+
+@router.post("/filter-keywords")
+def add_filter_keyword(body: FilterKeywordCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    kw = body.keyword.strip().lower()
+    if not kw:
+        raise HTTPException(400, "키워드를 입력해주세요")
+    exists = db.query(CrawlFilterKeyword).filter(CrawlFilterKeyword.keyword == kw).first()
+    if exists:
+        raise HTTPException(409, "이미 등록된 키워드입니다")
+    item = CrawlFilterKeyword(keyword=kw)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "keyword": item.keyword, "created_at": item.created_at.isoformat()}
+
+
+@router.delete("/filter-keywords/{keyword_id}")
+def delete_filter_keyword(keyword_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.query(CrawlFilterKeyword).filter(CrawlFilterKeyword.id == keyword_id).first()
+    if not item:
+        raise HTTPException(404, "키워드를 찾을 수 없습니다")
+    db.delete(item)
+    db.commit()
+    return {"ok": True}
