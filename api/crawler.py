@@ -67,8 +67,9 @@ SKIP_TYPE_KEYWORDS = [
     "shorts",
 ]
 
-# 최대 영상 길이 (초) — 10분 초과 영상 무시
-MAX_DURATION_SECONDS = 600
+# 영상 길이 제한 (초)
+MAX_DURATION_SECONDS = 600   # 10분 초과 무시
+MIN_DURATION_SECONDS = 61    # 60초 이하는 Shorts로 간주하고 무시
 
 # 곡 두 개 이상 합쳐진 영상 감지 패턴
 MULTI_SONG_PATTERNS = [
@@ -231,8 +232,11 @@ def _fetch_channel_videos(channel_id_or_handle: str, known_video_ids: set[str] |
         for item in detail_resp.get("items", []):
             duration = _parse_duration(item["contentDetails"]["duration"])
 
-            # 15분 초과 영상 무시
+            # 10분 초과 영상 무시
             if duration > MAX_DURATION_SECONDS:
+                continue
+            # Shorts (60초 이하) 무시
+            if duration < MIN_DURATION_SECONDS:
                 continue
 
             snippet = item["snippet"]
