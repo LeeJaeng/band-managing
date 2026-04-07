@@ -628,6 +628,91 @@ class MergeBody(BaseModel):
     target_id: str         # 남길 곡
 
 
+def _normalize_title_for_dedup(title: str) -> str:
+    """중복 감지용 제목 정규화.
+
+    - 괄호/대괄호 내용 제거: (심종호 인도), (Holy God), [마커스] …
+    - 소문자화
+    - 특수문자 및 다중 공백 정리
+    """
+    import re as _re
+    if not title:
+        return ""
+    t = title
+    t = _re.sub(r"\([^)]*\)", " ", t)
+    t = _re.sub(r"\[[^\]]*\]", " ", t)
+    t = _re.sub(r"[!?~。,.'\"·—–\-:/|]", " ", t)
+    t = _re.sub(r"\s+", " ", t).strip().lower()
+    return t
+
+
+@router.get("/songs/duplicate-candidates")
+def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """제목 정규화 기준으로 중복 후보 그룹을 반환.
+
+    반환: [
+      {
+        normalized: "거룩하신 하나님",
+        suggested_keep_id: "...",
+        songs: [{id, title, default_key, keys, tempo, ref_count, created_at}, ...]
+      },
+      ...
+    ]
+    """
+    songs = (
+        db.query(Song)
+        .filter(Song.source.in_(["MANUAL", "CRAWLED"]))
+        .all()
+    )
+    # 각 곡의 ref_count 조회 (group by)
+    from sqlalchemy import func
+    ref_counts: dict[str, int] = {
+        sid: cnt for sid, cnt in db.query(
+            SongReference.song_id, func.count(SongReference.id)
+        ).group_by(SongReference.song_id).all()
+    }
+
+    groups: dict[str, list[Song]] = {}
+    for s in songs:
+        norm = _normalize_title_for_dedup(s.title)
+        if len(norm) < 2:
+            continue
+        groups.setdefault(norm, []).append(s)
+
+    result = []
+    for norm, members in groups.items():
+        if len(members) < 2:
+            continue
+        # keep 후보: ref_count 많은 순 → 길이 긴 순 → 오래된 순
+        members.sort(
+            key=lambda s: (
+                -ref_counts.get(s.id, 0),
+                -len(s.title or ""),
+                s.created_at or datetime.min,
+            )
+        )
+        keep = members[0]
+        result.append({
+            "normalized": norm,
+            "suggested_keep_id": keep.id,
+            "songs": [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "default_key": s.default_key,
+                    "keys": s.keys or [],
+                    "tempo": s.tempo,
+                    "ref_count": ref_counts.get(s.id, 0),
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                }
+                for s in members
+            ],
+        })
+    # 그룹 크기 많은 순 → 정규화 제목 순
+    result.sort(key=lambda g: (-len(g["songs"]), g["normalized"]))
+    return {"groups": result, "total_groups": len(result)}
+
+
 @router.post("/songs/merge")
 def admin_merge_songs(body: MergeBody, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """여러 source 곡의 레퍼런스/악보/콘티아이템을 target으로 이전하고 source 삭제."""

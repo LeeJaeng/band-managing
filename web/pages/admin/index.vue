@@ -102,6 +102,57 @@ async function deleteMember(m: any) {
   } catch (e: any) { alert(e.message || '삭제 실패') }
 }
 
+// 중복 곡 정리
+const dupGroups = ref<any[]>([])
+const dupLoading = ref(false)
+const dupMerging = ref<string | null>(null)  // merging group normalized key
+const dupKeepChoice = ref<Record<string, string>>({})  // normalized → keep song id
+const showDupModal = ref(false)
+
+async function openDupModal() {
+  showDupModal.value = true
+  dupLoading.value = true
+  try {
+    const res = await api<any>(`/api/admin/songs/duplicate-candidates?_t=${Date.now()}`)
+    dupGroups.value = res.groups || []
+    // 초기 keep 선택: 서버가 추천한 suggested_keep_id
+    const init: Record<string, string> = {}
+    for (const g of dupGroups.value) init[g.normalized] = g.suggested_keep_id
+    dupKeepChoice.value = init
+  } catch (e: any) {
+    alert(e.message || '중복 곡 조회 실패')
+    showDupModal.value = false
+  }
+  dupLoading.value = false
+}
+
+function closeDupModal() {
+  showDupModal.value = false
+  dupGroups.value = []
+  dupKeepChoice.value = {}
+}
+
+async function mergeDupGroup(group: any) {
+  const keepId = dupKeepChoice.value[group.normalized]
+  if (!keepId) { alert('남길 곡을 선택해주세요.'); return }
+  const sourceIds = group.songs.map((s: any) => s.id).filter((id: string) => id !== keepId)
+  if (!sourceIds.length) { alert('병합할 곡이 없습니다.'); return }
+  const kept = group.songs.find((s: any) => s.id === keepId)
+  if (!confirm(`"${kept.title}"로 ${sourceIds.length}곡을 병합합니다.\n계속하시겠습니까?`)) return
+  dupMerging.value = group.normalized
+  try {
+    await api('/api/admin/songs/merge', {
+      method: 'POST',
+      body: JSON.stringify({ source_ids: sourceIds, target_id: keepId }),
+    })
+    // 병합된 그룹을 목록에서 제거
+    dupGroups.value = dupGroups.value.filter((g: any) => g.normalized !== group.normalized)
+  } catch (e: any) {
+    alert(e.message || '병합 실패')
+  }
+  dupMerging.value = null
+}
+
 // 채널 등록/편집
 const showChannelForm = ref(false)
 const editingChannelId = ref<string | null>(null)
@@ -528,6 +579,7 @@ onMounted(load)
             <button class="btn" :disabled="crawling" @click="crawlSetlistsAll">
               {{ crawling ? '...' : '전체 세트리스트' }}
             </button>
+            <button class="btn" @click="openDupModal">중복 곡 정리</button>
             <button class="btn-sm danger" @click="resetCrawlData">초기화</button>
           </div>
         </div>
@@ -738,6 +790,48 @@ onMounted(load)
       </section>
 
     </template>
+
+    <!-- 중복 곡 정리 모달 -->
+    <Teleport to="body">
+      <div v-if="showDupModal" class="modal-overlay" @click.self="closeDupModal">
+        <div class="modal-panel">
+          <div class="modal-header">
+            <h3>중복 곡 정리 ({{ dupGroups.length }} 그룹)</h3>
+            <button class="btn-sm" @click="closeDupModal">닫기</button>
+          </div>
+          <div v-if="dupLoading" class="dup-empty">불러오는 중...</div>
+          <div v-else-if="!dupGroups.length" class="dup-empty">중복 후보가 없습니다.</div>
+          <div v-else class="dup-group-list">
+            <div v-for="g in dupGroups" :key="g.normalized" class="dup-group">
+              <div class="dup-group-title">{{ g.normalized }}</div>
+              <div class="dup-song-rows">
+                <label v-for="s in g.songs" :key="s.id" class="dup-song-row">
+                  <input
+                    type="radio"
+                    :name="`dup-${g.normalized}`"
+                    :value="s.id"
+                    v-model="dupKeepChoice[g.normalized]"
+                  />
+                  <span class="dup-song-title">{{ s.title }}</span>
+                  <span class="dup-song-meta">
+                    {{ s.default_key || '키없음' }} · 레퍼런스 {{ s.ref_count }}
+                  </span>
+                </label>
+              </div>
+              <div class="dup-group-actions">
+                <button
+                  class="btn-accent btn-sm"
+                  :disabled="dupMerging === g.normalized"
+                  @click="mergeDupGroup(g)"
+                >
+                  {{ dupMerging === g.normalized ? '병합 중...' : '이 그룹 병합' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1057,6 +1151,55 @@ label {
   &:hover { color: var(--red); }
 }
 
+
+/* 중복 곡 정리 모달 */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal-panel {
+  @include card;
+  background: var(--bg);
+  width: 100%; max-width: 720px;
+  max-height: 85vh;
+  display: flex; flex-direction: column;
+  padding: 20px;
+}
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px;
+  h3 { margin: 0; }
+}
+.dup-empty {
+  padding: 32px; text-align: center; color: var(--text-dim);
+}
+.dup-group-list {
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding-right: 4px;
+}
+.dup-group {
+  @include card;
+  padding: 12px;
+}
+.dup-group-title {
+  font-size: 12px; color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.dup-song-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.dup-song-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+  cursor: pointer;
+  &:hover { background: var(--bg-soft); }
+  input { margin: 0; }
+}
+.dup-song-title { flex: 1; font-size: 14px; }
+.dup-song-meta { font-size: 12px; color: var(--text-dim); }
+.dup-group-actions { display: flex; justify-content: flex-end; }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
