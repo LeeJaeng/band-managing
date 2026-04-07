@@ -322,9 +322,76 @@ def export_review_queue(_: User = Depends(require_admin), db: Session = Depends(
     return {"text": "\n".join(lines), "count": len(items)}
 
 
+# 자동승인 시 "곡이 아닌" 영상을 걸러내는 블랙리스트.
+# video_title / parsed_song_title 둘 다에 대해 부분 일치 검사 (lowercase).
+NON_SONG_KEYWORDS = [
+    # 설교/말씀/기도
+    "설교", "sermon", "말씀묵상", "묵상", "큐티", "qt",
+    "기도회", "새벽기도", "중보기도", "통성기도",
+    # 축도/임직/권면
+    "축도", "축복기도", "임직", "임직식", "권면", "권사", "장로",
+    # 간증/나눔/인터뷰
+    "간증", "나눔", "소감", "인터뷰", "interview", "토크", "talk show",
+    # 강의/세미나/교육
+    "강의", "세미나", "특강", "교육", "컨퍼런스", "conference", "수련회",
+    # 공지/광고/이벤트
+    "공지", "광고", "홍보", "안내", "이벤트", "event", "모집",
+    # 예배순서/봉독/봉헌
+    "봉독", "봉헌", "성찬", "세례", "입교", "예배순서",
+    # 오프닝/클로징/사회
+    "오프닝", "클로징", "멘트", "사회",
+    # 일상/브이로그
+    "vlog", "브이로그", "일상", "데일리", "daily",
+    # 리뷰/챌린지
+    "챌린지", "challenge", "리뷰", "review",
+    # 트레일러/티저 (크롤러에서도 거르지만 이중 방어)
+    "trailer", "teaser", "예고",
+]
+
+# 서술/보고체 종결 — 곡 제목에는 거의 안 쓰이는 종결어만 (보수적)
+# "찬양합니다"(합니다 ≠ 습니다), "사랑해요" 같은 일반 곡 제목은 안 걸림.
+REPORT_ENDINGS = (
+    "습니다",       # "왔습니다", "받았습니다", "오셨습니다" 등 과거형 서술
+    "입니다",       # "오늘은 주일입니다"
+    "드립니다",     # "감사드립니다"
+)
+
+
+def _is_non_song_content(video_title: str, parsed_title: str) -> bool:
+    """블랙리스트 + 서술형 휴리스틱. True면 곡 아님 → PENDING 유지."""
+    import re as _re
+
+    vt = (video_title or "").lower()
+    pt_raw = parsed_title or ""
+
+    # 1) 블랙리스트 — 원본 제목 또는 파싱 제목에 포함되면 곡 아님
+    pt_lower = pt_raw.lower()
+    for kw in NON_SONG_KEYWORDS:
+        if kw in vt or kw in pt_lower:
+            return True
+
+    # 2) 서술/보고체 종결 — parsed_title 기준
+    stripped = pt_raw.rstrip(" .~。")
+    for ending in REPORT_ENDINGS:
+        if stripped.endswith(ending):
+            return True
+
+    # 3) 일상 설명형 접두 — "오늘의 말씀", "이번주 나눔" 등
+    if _re.match(r"^(오늘의|금주|이번주|이번\s)", pt_raw):
+        return True
+
+    return False
+
+
 @router.post("/review/auto-approve")
 def auto_approve_review_queue(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """검증 큐 자동 승인: 깔끔한 것은 자동 등록, 애매한 것만 남김."""
+    """검증 큐 자동 승인: 깔끔한 것은 자동 등록, 애매한 것만 남김.
+
+    필터 순서:
+      1) 길이/공백/숫자 기본 이상 감지
+      2) 곡이 아닌 영상 판정(블랙리스트 + 문장형 휴리스틱)
+      3) 위 둘 다 통과한 항목만 APPROVED 처리
+    """
     import re
 
     items = db.query(ReviewQueue).filter(ReviewQueue.status == "PENDING").all()
@@ -350,6 +417,9 @@ def auto_approve_review_queue(_: User = Depends(require_admin), db: Session = De
             is_ambiguous = True
         # 4) 숫자만 있거나 의미 없는 제목
         elif re.match(r'^[\d\s\-\.]+$', title):
+            is_ambiguous = True
+        # 5) 곡이 아닌 콘텐츠 (설교/축도/나눔 등)
+        elif _is_non_song_content(rq.video_title or "", title):
             is_ambiguous = True
 
         if is_ambiguous:
