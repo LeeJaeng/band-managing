@@ -108,6 +108,7 @@ const dupLoading = ref(false)
 const dupMerging = ref<string | null>(null)  // merging group normalized key
 const dupKeepChoice = ref<Record<string, string>>({})  // normalized → keep song id
 const dupTitleEdit = ref<Record<string, string>>({})  // normalized → 편집된 target 제목
+const dupMergeSelection = ref<Record<string, Set<string>>>({})  // normalized → 병합할 song id 집합
 const showDupModal = ref(false)
 
 async function openDupModal() {
@@ -119,13 +120,19 @@ async function openDupModal() {
     // 초기 keep 선택: 서버가 추천한 suggested_keep_id
     const init: Record<string, string> = {}
     const initTitle: Record<string, string> = {}
+    const initSel: Record<string, Set<string>> = {}
     for (const g of dupGroups.value) {
       init[g.normalized] = g.suggested_keep_id
       const keep = g.songs.find((s: any) => s.id === g.suggested_keep_id)
       initTitle[g.normalized] = keep?.title || ''
+      // 기본: keep 외 전부 선택 (기존 동작 유지)
+      initSel[g.normalized] = new Set(
+        g.songs.filter((s: any) => s.id !== g.suggested_keep_id).map((s: any) => s.id)
+      )
     }
     dupKeepChoice.value = init
     dupTitleEdit.value = initTitle
+    dupMergeSelection.value = initSel
   } catch (e: any) {
     alert(e.message || '중복 곡 조회 실패')
     showDupModal.value = false
@@ -138,20 +145,35 @@ function closeDupModal() {
   dupGroups.value = []
   dupKeepChoice.value = {}
   dupTitleEdit.value = {}
+  dupMergeSelection.value = {}
 }
 
 function onDupKeepChange(group: any) {
-  // 라디오 변경 시 편집중인 제목을 새로 선택된 곡 제목으로 리셋
+  // 라디오 변경 시: 제목 리셋 + 병합 선택에서 새 keep 제외
   const keepId = dupKeepChoice.value[group.normalized]
   const keep = group.songs.find((s: any) => s.id === keepId)
   if (keep) dupTitleEdit.value[group.normalized] = keep.title || ''
+  const sel = dupMergeSelection.value[group.normalized]
+  if (sel) sel.delete(keepId)
+}
+
+function toggleDupMerge(group: any, songId: string) {
+  const sel = dupMergeSelection.value[group.normalized]
+  if (!sel) return
+  if (sel.has(songId)) sel.delete(songId)
+  else sel.add(songId)
+  // Set 변이를 reactivity에 알리기 위해 새 Set으로 교체
+  dupMergeSelection.value[group.normalized] = new Set(sel)
 }
 
 async function mergeDupGroup(group: any) {
   const keepId = dupKeepChoice.value[group.normalized]
   if (!keepId) { alert('남길 곡을 선택해주세요.'); return }
-  const sourceIds = group.songs.map((s: any) => s.id).filter((id: string) => id !== keepId)
-  if (!sourceIds.length) { alert('병합할 곡이 없습니다.'); return }
+  const sel = dupMergeSelection.value[group.normalized] || new Set<string>()
+  const sourceIds = group.songs
+    .map((s: any) => s.id)
+    .filter((id: string) => id !== keepId && sel.has(id))
+  if (!sourceIds.length) { alert('병합할 곡을 선택해주세요.'); return }
   const kept = group.songs.find((s: any) => s.id === keepId)
   const newTitle = (dupTitleEdit.value[group.normalized] || '').trim()
   const finalTitle = newTitle || kept.title
@@ -919,20 +941,29 @@ onMounted(load)
             <div v-for="g in dupGroups" :key="g.normalized" class="dup-group">
               <div class="dup-group-title">{{ g.normalized }}</div>
               <div class="dup-song-rows">
-                <label v-for="s in g.songs" :key="s.id" class="dup-song-row">
+                <div v-for="s in g.songs" :key="s.id" class="dup-song-row">
                   <input
                     type="radio"
-                    :name="`dup-${g.normalized}`"
+                    :name="`dup-keep-${g.normalized}`"
                     :value="s.id"
                     v-model="dupKeepChoice[g.normalized]"
                     @change="onDupKeepChange(g)"
+                    title="남길 곡"
+                  />
+                  <input
+                    type="checkbox"
+                    :checked="dupMergeSelection[g.normalized]?.has(s.id)"
+                    :disabled="dupKeepChoice[g.normalized] === s.id"
+                    @change="toggleDupMerge(g, s.id)"
+                    title="병합할 곡"
                   />
                   <span class="dup-song-title">{{ s.title }}</span>
                   <span class="dup-song-meta">
                     {{ s.default_key || '키없음' }} · 레퍼런스 {{ s.ref_count }}
                   </span>
-                </label>
+                </div>
               </div>
+              <div class="dup-legend">○ 남길 곡 / ☑ 병합할 곡 (체크 해제하면 그대로 둠)</div>
               <div class="dup-title-edit">
                 <label>병합 후 제목</label>
                 <input
@@ -1322,6 +1353,7 @@ label {
 }
 .dup-song-title { flex: 1; font-size: 14px; }
 .dup-song-meta { font-size: 12px; color: var(--text-dim); }
+.dup-legend { font-size: 11px; color: var(--text-dim); margin: 4px 0 8px; }
 .dup-title-edit {
   display: flex; flex-direction: column; gap: 4px;
   margin-bottom: 10px;
