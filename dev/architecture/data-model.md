@@ -29,6 +29,7 @@ crawl_channels
 | artist | String(200), nullable | 원곡자 (UI에서 미사용) |
 | default_key | String(10), nullable | 기본 키 (레거시) |
 | keys | JSON, nullable | 키 목록 ["A", "G", "Bb"] |
+| tempo | String(10), nullable | 빠르기 (FAST/SLOW, null=미분류) |
 | lyrics | Text, nullable | 가사/송폼 |
 | created_at | DateTime | |
 | updated_at | DateTime | |

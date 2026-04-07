@@ -14,12 +14,15 @@
 채널 등록 (관리자, URL만 입력)
   ↓ URL → @handle → UC... 자동 변환 (channels API)
 크롤링 실행 (수동 트리거)
-  ↓ playlistItems로 영상 ID 수집 (최대 250개)
+  ↓ playlistItems로 영상 ID 수집 (페이지 제한 없음, 채널 전체)
+  ↓ 이미 수집된 영상 만나면 조기 종료 (증분 수집, 최신순)
   ↓ videos로 duration + snippet 조회
 필터링
-  ↓ 10분 초과 → 무시
+  ↓ 60초 이하 → Shorts로 간주, 무시
+  ↓ 10분(600초) 초과 → 무시
   ↓ 예배실황/연주/inst/MR 등 → 무시
   ↓ 곡 합쳐진 영상 (+, 메들리 등) → 무시
+  ↓ DB 등록 추가 필터 키워드 → 무시
   ↓ 이미 수집된 영상 → 스킵
 제목 파싱
   ↓ [대괄호], (Official), | 뒤 등 제거
@@ -31,9 +34,10 @@
 ```
 
 ### 필터링 규칙
-- **시간**: 10분(600초) 초과 무시
+- **시간**: 60초 이하(Shorts) 무시, 10분(600초) 초과 무시
 - **키워드 제외**: inst, instrumental, 연주, MR, 반주, AR, 드럼캠, 기타캠, 베이스캠, making, shorts, teaser, interview, 예배실황, 주일예배, 설교
 - **합쳐진 곡**: +, &, medley, 메들리, 모음, 연속 듣기, playlist, worship set
+- **DB 추가 키워드**: 관리자가 `/api/admin/filter-keywords`로 동적 추가 가능
 
 ### 제목 파싱 (팀 이름 제거)
 ```
@@ -50,7 +54,7 @@
 - 잔치공동체, 피아워십, 기프티드
 
 ### API 사용량
-- playlistItems: 1 unit/호출 (50개씩, 최대 5페이지 = 5 units)
+- playlistItems: 1 unit/호출 (50개씩, 페이지 제한 없음 → 채널 전체, 증분 수집으로 조기 종료)
 - videos: 1 unit/호출 (50개씩 배치)
 - channels: 1 unit (채널 ID 변환)
 - 일일 무료 할당량: 10,000 units

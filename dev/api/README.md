@@ -31,14 +31,19 @@ api/
 GET /health → { ok, service }
 ```
 
+### 공개 (/api)
+```
+GET    /api/channels                    채널(팀) 목록 (곡 필터용, 인증 불필요)
+```
+
 ### 곡 (/api/songs)
 ```
-GET    /api/songs?q=&limit=&offset=     곡 목록 (검색, ref_count 포함)
+GET    /api/songs?q=&limit=&offset=&key_filter=&tempo=&channel_id=
+                                        곡 목록 (검색, 키/빠르기/채널 필터, ref_count 포함)
 GET    /api/songs/:id                   곡 상세 (refs, sheets, keys 포함)
 POST   /api/songs                       곡 등록
-PUT    /api/songs/:id                   곡 수정 (title, keys[], lyrics)
+PUT    /api/songs/:id                   곡 수정 (title, keys[], lyrics, tempo)
 DELETE /api/songs/:id                   곡 삭제 (FK 정리)
-POST   /api/songs/merge?source_id&target_id  곡 병합
 ```
 
 ### 레퍼런스 (/api/songs/:id/references)
@@ -80,7 +85,19 @@ GET    /api/admin/channels/resolve-id   @handle → UC... 변환
 POST   /api/admin/crawl/:channel_id     개별 크롤링
 POST   /api/admin/crawl/all             전체 크롤링
 GET    /api/admin/crawl/logs            크롤링 로그
-GET    /api/admin/review-queue          검증 큐 (유사곡 후보 포함)
-POST   /api/admin/review/:id/approve    승인 (기존곡 매칭 or 새곡)
-POST   /api/admin/review/:id/reject     거부
+DELETE /api/admin/crawl/reset           크롤링 + 곡 데이터 전체 삭제 (TRUNCATE)
+
+GET    /api/admin/review-queue          검증 큐 (유사곡 후보 포함, 페이지네이션 10개)
+GET    /api/admin/review-queue/export   검증 큐 전체 내보내기 (JSON)
+POST   /api/admin/review/auto-approve   자동 승인 (유사도 높은 항목 일괄)
+POST   /api/admin/review/batch          일괄 처리 (approve/reject ids 배열)
+POST   /api/admin/review/:id/approve    개별 승인 (기존곡 매칭 or 새곡)
+POST   /api/admin/review/:id/reject     개별 거부
+
+POST   /api/admin/songs/merge           곡 병합 (target_id + source_ids[] 배열)
+POST   /api/admin/songs/bulk-update     선택 곡 일괄 수정 (키 추가, tempo 설정)
+
+GET    /api/admin/filter-keywords       크롤링 필터 키워드 목록
+POST   /api/admin/filter-keywords       키워드 추가
+DELETE /api/admin/filter-keywords/:id   키워드 삭제
 ```
