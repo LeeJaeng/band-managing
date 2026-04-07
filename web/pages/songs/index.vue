@@ -7,21 +7,24 @@ const query = ref('')
 const total = ref(0)
 const loading = ref(false)
 
-const selected = ref<Set<string>>(new Set())
+const selected = ref<string[]>([])
 const merging = ref(false)
 
+function isSelected(id: string) {
+  return selected.value.includes(id)
+}
+
 function toggleSelect(id: string) {
-  const s = new Set(selected.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  selected.value = s
+  const idx = selected.value.indexOf(id)
+  if (idx >= 0) selected.value.splice(idx, 1)
+  else selected.value.push(id)
 }
 
 function clearSelection() {
-  selected.value = new Set()
+  selected.value = []
 }
 
-const selectedSongs = computed(() => songs.value.filter(s => selected.value.has(s.id)))
+const selectedSongs = computed(() => songs.value.filter(s => selected.value.includes(s.id)))
 
 async function doMerge(sourceId: string, targetId: string) {
   const src = songs.value.find(s => s.id === sourceId)!
@@ -86,10 +89,10 @@ onMounted(search)
         v-for="s in songs"
         :key="s.id"
         class="song-card"
-        :class="{ selected: selected.has(s.id) }"
+        :class="{ selected: isSelected(s.id) }"
       >
         <label v-if="isAdmin" class="checkbox-wrap" @click.prevent="toggleSelect(s.id)">
-          <input type="checkbox" :checked="selected.has(s.id)" @change="toggleSelect(s.id)" />
+          <input type="checkbox" :checked="isSelected(s.id)" @change="toggleSelect(s.id)" />
         </label>
         <NuxtLink :to="`/songs/${s.id}`" class="song-info">
           <div class="song-title">{{ s.title }}</div>
@@ -104,9 +107,9 @@ onMounted(search)
 
     <!-- 병합 바 (2개 선택 시) -->
     <Teleport to="body">
-      <div v-if="isAdmin && selected.size >= 2" class="merge-bar">
+      <div v-if="isAdmin && selected.length >= 2" class="merge-bar">
         <button class="merge-bar-close" @click="clearSelection">✕</button>
-        <span class="merge-bar-label">{{ selected.size }}개 선택됨 — 어떻게 병합할까요?</span>
+        <span class="merge-bar-label">{{ selected.length }}개 선택됨 — 어떻게 병합할까요?</span>
         <div class="merge-bar-actions">
           <button
             class="merge-btn"
