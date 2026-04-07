@@ -497,24 +497,59 @@ def update_song_source(song_id: str, body: SongSourceUpdate, _: User = Depends(r
 
 # ── 곡 병합 (admin) ─────────────────────────────────────
 
-@router.post("/songs/merge")
-def admin_merge_songs(source_id: str, target_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """source 곡의 레퍼런스/악보/콘티아이템을 target으로 이전하고 source 삭제."""
-    if source_id == target_id:
-        raise HTTPException(400, "source와 target이 같습니다")
-    source = db.query(Song).filter(Song.id == source_id).first()
-    target = db.query(Song).filter(Song.id == target_id).first()
-    if not source:
-        raise HTTPException(404, f"source 곡({source_id})을 찾을 수 없습니다")
-    if not target:
-        raise HTTPException(404, f"target 곡({target_id})을 찾을 수 없습니다")
+class MergeBody(BaseModel):
+    source_ids: list[str]  # 삭제될 곡들
+    target_id: str         # 남길 곡
 
-    db.query(SongReference).filter(SongReference.song_id == source_id).update({"song_id": target_id})
-    db.query(SongSheet).filter(SongSheet.song_id == source_id).update({"song_id": target_id})
-    db.query(ContiItem).filter(ContiItem.song_id == source_id).update({"song_id": target_id})
-    db.delete(source)
+
+@router.post("/songs/merge")
+def admin_merge_songs(body: MergeBody, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """여러 source 곡의 레퍼런스/악보/콘티아이템을 target으로 이전하고 source 삭제."""
+    source_ids = [sid for sid in body.source_ids if sid != body.target_id]
+    if not source_ids:
+        raise HTTPException(400, "source 곡이 없습니다")
+    target = db.query(Song).filter(Song.id == body.target_id).first()
+    if not target:
+        raise HTTPException(404, "target 곡을 찾을 수 없습니다")
+
+    for source_id in source_ids:
+        source = db.query(Song).filter(Song.id == source_id).first()
+        if not source:
+            continue
+        db.query(SongReference).filter(SongReference.song_id == source_id).update({"song_id": body.target_id})
+        db.query(SongSheet).filter(SongSheet.song_id == source_id).update({"song_id": body.target_id})
+        db.query(ContiItem).filter(ContiItem.song_id == source_id).update({"song_id": body.target_id})
+        db.delete(source)
+
     db.commit()
-    return {"ok": True, "merged_into": target_id, "source_title": source.title, "target_title": target.title}
+    return {"ok": True, "merged_into": body.target_id, "merged_count": len(source_ids)}
+
+
+class BulkUpdateBody(BaseModel):
+    song_ids: list[str]
+    add_keys: list[str] | None = None   # 기존 keys에 추가
+    set_tempo: str | None = None        # FAST / SLOW / "" (빈 문자열이면 초기화)
+
+
+@router.post("/songs/bulk-update")
+def bulk_update_songs(body: BulkUpdateBody, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """여러 곡에 키 추가 또는 빠르기 일괄 설정."""
+    updated = 0
+    for song_id in body.song_ids:
+        song = db.query(Song).filter(Song.id == song_id).first()
+        if not song:
+            continue
+        if body.add_keys:
+            existing = list(song.keys or [])
+            for k in body.add_keys:
+                if k not in existing:
+                    existing.append(k)
+            song.keys = existing
+        if body.set_tempo is not None:
+            song.tempo = body.set_tempo if body.set_tempo else None
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
 
 
 # ── 필터 키워드 관리 ────────────────────────────────────

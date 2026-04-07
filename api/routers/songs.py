@@ -26,6 +26,7 @@ class SongUpdate(BaseModel):
     default_key: str | None = None
     keys: list[str] | None = None
     lyrics: str | None = None
+    tempo: str | None = None  # FAST / SLOW / null
 
 
 class ReferenceCreate(BaseModel):
@@ -58,17 +59,19 @@ class SheetCreate(BaseModel):
 def list_songs(
     q: str = Query(default="", description="검색어 (제목/가사)"),
     source: str = Query(default="", description="소스 필터 (CRAWLED/MANUAL/USER)"),
+    key_filter: str = Query(default="", description="키 필터"),
+    tempo: str = Query(default="", description="빠르기 필터 (FAST/SLOW)"),
+    channel_id: str = Query(default="", description="채널(팀) 필터"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
+    from models import SongReference as _SR
     query = db.query(Song)
     if source:
-        # 관리자용 소스 필터 (유저 등록 곡 정제 큐)
         query = query.filter(Song.source == source)
     else:
-        # 일반 조회: 정식 곡 + 본인 임시 곡
         if user:
             query = query.filter(
                 or_(
@@ -81,6 +84,23 @@ def list_songs(
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Song.title.ilike(like), Song.lyrics.ilike(like)))
+    if key_filter:
+        from sqlalchemy import cast, String as Str
+        query = query.filter(
+            or_(
+                Song.default_key == key_filter,
+                Song.keys.cast(Str).contains(f'"{key_filter}"'),
+                Song.keys.cast(Str).contains(f"'{key_filter}'"),
+            )
+        )
+    if tempo:
+        query = query.filter(Song.tempo == tempo)
+    if channel_id:
+        query = query.filter(
+            Song.id.in_(
+                db.query(_SR.song_id).filter(_SR.channel_id == channel_id)
+            )
+        )
     total = query.count()
     songs = (
         query.options(joinedload(Song.references))
@@ -94,6 +114,8 @@ def list_songs(
                 "title": s.title,
                 "artist": s.artist,
                 "default_key": s.default_key,
+                "keys": s.keys or [],
+                "tempo": s.tempo,
                 "source": s.source,
                 "ref_count": len(s.references),
                 "created_at": s.created_at.isoformat() if s.created_at else None,

@@ -40,6 +40,7 @@ class Song(Base):
     keys: Mapped[list | None] = mapped_column(JSON, nullable=True)  # ["A", "Bb", "G"]
     lyrics: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(10), default="MANUAL")  # CRAWLED / MANUAL / USER
+    tempo: Mapped[str | None] = mapped_column(String(10), nullable=True)  # FAST / SLOW / null
     user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)  # USER 곡의 소유자
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)

@@ -16,6 +16,7 @@ MIGRATIONS = [
     "ALTER TABLE songs ADD COLUMN IF NOT EXISTS source VARCHAR(10) DEFAULT 'MANUAL'",
     "ALTER TABLE contis ADD COLUMN IF NOT EXISTS user_id VARCHAR REFERENCES users(id)",
     "ALTER TABLE songs ADD COLUMN IF NOT EXISTS user_id VARCHAR REFERENCES users(id)",
+    "ALTER TABLE songs ADD COLUMN IF NOT EXISTS tempo VARCHAR(10)",
 ]
 
 
@@ -70,3 +71,15 @@ app.include_router(team.router)
 @app.get("/health")
 def health():
     return {"ok": True, "service": "band-managing-api"}
+
+
+@app.get("/api/channels")
+def list_channels_public(db=None):
+    """곡 필터용 채널 목록 (공개)."""
+    from db import get_db as _get_db
+    from models import CrawlChannel
+    from fastapi import Depends
+    # 직접 DB 세션 사용
+    with _Session(engine) as session:
+        channels = session.query(CrawlChannel).filter(CrawlChannel.is_active == True).order_by(CrawlChannel.name).all()
+        return [{"id": c.id, "name": c.name} for c in channels]

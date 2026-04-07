@@ -252,24 +252,34 @@ onMounted(load)
 
         <div v-if="song.references.length === 0" class="empty-sm">레퍼런스 없음</div>
         <div v-for="ref in song.references" :key="ref.id" class="ref-card">
-          <div class="ref-main">
-            <a :href="ref.youtube_url" target="_blank" class="ref-title">{{ ref.title }}</a>
-            <div class="ref-meta">
-              <span v-if="ref.key" class="key-badge sm">{{ ref.key }}</span>
-              <span :class="['trust', ref.trust_level.toLowerCase()]">{{ ref.trust_level }}</span>
-              <span class="source">{{ ref.source }}</span>
+          <!-- 썸네일 -->
+          <a v-if="ref.youtube_video_id || ref.thumbnail_url" :href="ref.youtube_url" target="_blank" class="ref-thumb">
+            <img
+              :src="ref.thumbnail_url || `https://img.youtube.com/vi/${ref.youtube_video_id}/mqdefault.jpg`"
+              :alt="ref.title"
+            />
+            <span class="play-icon">▶</span>
+          </a>
+          <div class="ref-body">
+            <div class="ref-main">
+              <a :href="ref.youtube_url" target="_blank" class="ref-title">{{ ref.title }}</a>
+              <div class="ref-meta">
+                <span v-if="ref.key" class="key-badge sm">{{ ref.key }}</span>
+                <span :class="['trust', ref.trust_level.toLowerCase()]">{{ ref.trust_level }}</span>
+                <span class="source">{{ ref.source }}</span>
+              </div>
+            </div>
+
+            <!-- 해당 레퍼런스의 악보 -->
+            <div v-if="song.sheets.filter((s: any) => s.reference_id === ref.id).length > 0" class="ref-sheets">
+              <div v-for="sh in song.sheets.filter((s: any) => s.reference_id === ref.id)" :key="sh.id" class="sheet-item">
+                <a :href="sh.file_url" target="_blank">{{ sh.file_type }} 악보</a>
+                <button class="btn-xs danger" @click="deleteSheet(sh.id)">x</button>
+              </div>
             </div>
           </div>
 
-          <!-- 해당 레퍼런스의 악보 -->
-          <div v-if="song.sheets.filter((s: any) => s.reference_id === ref.id).length > 0" class="ref-sheets">
-            <div v-for="sh in song.sheets.filter((s: any) => s.reference_id === ref.id)" :key="sh.id" class="sheet-item">
-              <a :href="sh.file_url" target="_blank">{{ sh.file_type }} 악보</a>
-              <button class="btn-xs danger" @click="deleteSheet(sh.id)">x</button>
-            </div>
-          </div>
-
-          <button class="btn-xs danger" @click="deleteReference(ref.id)">삭제</button>
+          <button class="btn-xs danger ref-delete" @click="deleteReference(ref.id)">삭제</button>
         </div>
       </section>
 
@@ -465,11 +475,34 @@ onMounted(load)
   padding: 12px 16px;
   margin-bottom: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
+.ref-thumb {
+  flex-shrink: 0;
+  position: relative;
+  width: 120px;
+  aspect-ratio: 16/9;
+  border-radius: 6px;
+  overflow: hidden;
+  display: block;
+
+  img { width: 100%; height: 100%; object-fit: cover; }
+
+  .play-icon {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.3); color: #fff; font-size: 20px;
+    opacity: 0; transition: opacity .15s;
+  }
+
+  &:hover .play-icon { opacity: 1; }
+}
+
+.ref-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .ref-main { flex: 1; }
+.ref-delete { flex-shrink: 0; }
 
 .ref-title {
   font-weight: 600;
