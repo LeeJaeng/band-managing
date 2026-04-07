@@ -693,17 +693,64 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
         ).group_by(SongReference.song_id).all()
     }
 
-    groups: dict[str, list[Song]] = {}
+    norms: list[tuple[Song, str]] = []
     for s in songs:
-        norm = _normalize_title_for_dedup(s.title)
-        if len(norm) < 2:
+        n = _normalize_title_for_dedup(s.title)
+        if len(n) < 2:
             continue
-        groups.setdefault(norm, []).append(s)
+        norms.append((s, n))
+
+    # Union-Find: 정확 일치 + 접두 일치 그룹화
+    parent: dict[str, str] = {s.id: s.id for s, _ in norms}
+
+    def _find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: str, b: str) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # 1) 정확 일치
+    by_norm: dict[str, list[Song]] = {}
+    for s, n in norms:
+        by_norm.setdefault(n, []).append(s)
+    for members in by_norm.values():
+        if len(members) > 1:
+            first = members[0]
+            for m in members[1:]:
+                _union(first.id, m.id)
+
+    # 2) 접두 일치 — lex 정렬 후 인접 검사 (최소 4글자 이상)
+    PREFIX_MIN = 4
+    sorted_norms = sorted(norms, key=lambda x: x[1])
+    for i in range(len(sorted_norms)):
+        s1, n1 = sorted_norms[i]
+        if len(n1) < PREFIX_MIN:
+            continue
+        for j in range(i + 1, len(sorted_norms)):
+            s2, n2 = sorted_norms[j]
+            if not n2.startswith(n1):
+                break
+            _union(s1.id, s2.id)
+
+    # 그룹 모으기
+    groups: dict[str, list[Song]] = {}
+    norm_lookup = {s.id: n for s, n in norms}
+    song_lookup = {s.id: s for s, _ in norms}
+    for sid in parent:
+        root = _find(sid)
+        groups.setdefault(root, []).append(song_lookup[sid])
 
     result = []
-    for norm, members in groups.items():
+    for root, members in groups.items():
         if len(members) < 2:
             continue
+        # 그룹 대표 normalized: 가장 짧은 것 (가장 일반적인 접두)
+        norm = min(norm_lookup[m.id] for m in members)
         # keep 후보: ref_count 많은 순 → 길이 긴 순 → 오래된 순
         members.sort(
             key=lambda s: (
