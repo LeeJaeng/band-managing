@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from db import get_db
-from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference, SongSheet, ContiItem, User, CrawlFilterKeyword
+from models import CrawlChannel, CrawlLog, ReviewQueue, Song, SongReference, SongSheet, ContiItem, User, CrawlFilterKeyword, DedupIgnore
 from auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -745,9 +745,15 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
         root = _find(sid)
         groups.setdefault(root, []).append(song_lookup[sid])
 
+    # 숨김 처리된 그룹 키 조회
+    ignored_keys = {gk for (gk,) in db.query(DedupIgnore.group_key).all()}
+
     result = []
     for root, members in groups.items():
         if len(members) < 2:
+            continue
+        group_key = "|".join(sorted(m.id for m in members))
+        if group_key in ignored_keys:
             continue
         # 그룹 대표 normalized: 가장 짧은 것 (가장 일반적인 접두)
         norm = min(norm_lookup[m.id] for m in members)
@@ -763,6 +769,7 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
         keep = members[0]
         result.append({
             "normalized": norm,
+            "group_key": group_key,
             "suggested_keep_id": keep.id,
             "songs": [
                 {
@@ -780,6 +787,35 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
     # 그룹 크기 많은 순 → 정규화 제목 순
     result.sort(key=lambda g: (-len(g["songs"]), g["normalized"]))
     return {"groups": result, "total_groups": len(result)}
+
+
+class DedupIgnoreBody(BaseModel):
+    group_keys: list[str]
+
+
+@router.post("/songs/dedup-ignore")
+def add_dedup_ignores(
+    body: DedupIgnoreBody,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """선택한 중복 후보 그룹을 숨김 처리.
+
+    group_key = 정렬된 song.id를 '|'로 join한 문자열.
+    그룹 구성이 정확히 같을 때만 매칭 → 새 곡이 합류하면 다시 노출.
+    """
+    added = 0
+    for gk in body.group_keys:
+        gk = (gk or "").strip()
+        if not gk:
+            continue
+        exists = db.query(DedupIgnore).filter(DedupIgnore.group_key == gk).first()
+        if exists:
+            continue
+        db.add(DedupIgnore(group_key=gk))
+        added += 1
+    db.commit()
+    return {"added": added}
 
 
 @router.post("/songs/delete-setlist-refs")

@@ -222,7 +222,7 @@ def update_song(song_id: str, body: SongUpdate, _: User = Depends(get_current_us
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(404, "Song not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(song, field, value)
     db.commit()
     db.refresh(song)

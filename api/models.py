@@ -208,3 +208,16 @@ class CrawlFilterKeyword(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     keyword: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class DedupIgnore(Base):
+    """중복 곡 정리에서 '이 조합은 중복 아님'으로 사용자가 표시한 곡 그룹.
+
+    group_key = 정렬된 song.id를 '|'로 join한 문자열.
+    그룹 구성이 정확히 같을 때만 매칭 → 새 곡이 합류하면 다시 노출.
+    """
+    __tablename__ = "dedup_ignores"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    group_key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

@@ -109,6 +109,8 @@ const dupMerging = ref<string | null>(null)  // merging group normalized key
 const dupKeepChoice = ref<Record<string, string>>({})  // normalized → keep song id
 const dupTitleEdit = ref<Record<string, string>>({})  // normalized → 편집된 target 제목
 const dupMergeSelection = ref<Record<string, Set<string>>>({})  // normalized → 병합할 song id 집합
+const dupHideSelection = ref<Set<string>>(new Set())  // 숨길 그룹의 group_key 집합
+const dupHiding = ref(false)
 const showDupModal = ref(false)
 
 async function openDupModal() {
@@ -133,6 +135,7 @@ async function openDupModal() {
     dupKeepChoice.value = init
     dupTitleEdit.value = initTitle
     dupMergeSelection.value = initSel
+    dupHideSelection.value = new Set()
   } catch (e: any) {
     alert(e.message || '중복 곡 조회 실패')
     showDupModal.value = false
@@ -146,6 +149,33 @@ function closeDupModal() {
   dupKeepChoice.value = {}
   dupTitleEdit.value = {}
   dupMergeSelection.value = {}
+  dupHideSelection.value = new Set()
+}
+
+function toggleDupHide(groupKey: string) {
+  if (!groupKey) return
+  const sel = dupHideSelection.value
+  if (sel.has(groupKey)) sel.delete(groupKey)
+  else sel.add(groupKey)
+  dupHideSelection.value = new Set(sel)
+}
+
+async function applyDupHide() {
+  const keys = Array.from(dupHideSelection.value)
+  if (!keys.length) { alert('숨길 그룹을 선택해주세요.'); return }
+  if (!confirm(`${keys.length}개 그룹을 숨김 처리합니다.\n계속하시겠습니까?`)) return
+  dupHiding.value = true
+  try {
+    await api('/api/admin/songs/dedup-ignore', {
+      method: 'POST',
+      body: JSON.stringify({ group_keys: keys }),
+    })
+    dupGroups.value = dupGroups.value.filter((g: any) => !dupHideSelection.value.has(g.group_key))
+    dupHideSelection.value = new Set()
+  } catch (e: any) {
+    alert(e.message || '숨김 처리 실패')
+  }
+  dupHiding.value = false
 }
 
 function onDupKeepChange(group: any) {
@@ -943,13 +973,32 @@ onMounted(load)
         <div class="modal-panel">
           <div class="modal-header">
             <h3>중복 곡 정리 ({{ dupGroups.length }} 그룹)</h3>
-            <button class="btn-sm" @click="closeDupModal">닫기</button>
+            <div class="dup-header-actions">
+              <button
+                class="btn-sm"
+                :disabled="dupHiding || !dupHideSelection.size"
+                @click="applyDupHide"
+              >
+                {{ dupHiding ? '숨기는 중...' : `선택한 그룹 숨기기 (${dupHideSelection.size})` }}
+              </button>
+              <button class="btn-sm" @click="closeDupModal">닫기</button>
+            </div>
           </div>
           <div v-if="dupLoading" class="dup-empty">불러오는 중...</div>
           <div v-else-if="!dupGroups.length" class="dup-empty">중복 후보가 없습니다.</div>
           <div v-else class="dup-group-list">
             <div v-for="g in dupGroups" :key="g.normalized" class="dup-group">
-              <div class="dup-group-title">{{ g.normalized }}</div>
+              <div class="dup-group-header">
+                <div class="dup-group-title">{{ g.normalized }}</div>
+                <label class="dup-hide-toggle">
+                  <input
+                    type="checkbox"
+                    :checked="dupHideSelection.has(g.group_key)"
+                    @change="toggleDupHide(g.group_key)"
+                  />
+                  이 조합 숨기기
+                </label>
+              </div>
               <div class="dup-song-rows">
                 <div v-for="s in g.songs" :key="s.id" class="dup-song-row">
                   <input
@@ -1349,10 +1398,20 @@ label {
   @include card;
   padding: 12px;
 }
+.dup-group-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 8px;
+}
 .dup-group-title {
   font-size: 12px; color: var(--text-dim);
-  margin-bottom: 8px;
 }
+.dup-hide-toggle {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text-dim); margin: 0;
+  cursor: pointer;
+  input { margin: 0; }
+}
+.dup-header-actions { display: flex; gap: 8px; align-items: center; }
 .dup-song-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .dup-song-row {
   display: flex; align-items: center; gap: 8px;

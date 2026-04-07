@@ -106,6 +106,72 @@ async function doBulkUpdate() {
   bulkBusy.value = false
 }
 
+// 빠른 편집 모달
+const editingSong = ref<any>(null)
+const editForm = ref({ title: '', keys: [] as string[], tempo: '', lyrics: '' })
+const editSaving = ref(false)
+const editShowLyrics = ref(false)
+
+function openEdit(e: Event, s: any) {
+  e.preventDefault(); e.stopPropagation()
+  editingSong.value = s
+  editForm.value = {
+    title: s.title || '',
+    keys: [...(s.keys || [])],
+    tempo: s.tempo || '',
+    lyrics: s.lyrics || '',
+  }
+  editShowLyrics.value = false
+}
+
+function closeEdit() {
+  editingSong.value = null
+  editSaving.value = false
+}
+
+function toggleEditKey(k: string) {
+  const idx = editForm.value.keys.indexOf(k)
+  if (idx >= 0) editForm.value.keys.splice(idx, 1)
+  else editForm.value.keys.push(k)
+}
+
+async function saveEdit() {
+  if (!editingSong.value) return
+  const target = editingSong.value
+  const title = editForm.value.title.trim()
+  if (!title) { alert('제목을 입력해주세요.'); return }
+  editSaving.value = true
+  try {
+    const body: any = {
+      title,
+      keys: editForm.value.keys,
+      tempo: editForm.value.tempo || null,
+    }
+    // lyrics는 사용자가 펼쳐서 변경한 경우에만 전송
+    if (editShowLyrics.value) body.lyrics = editForm.value.lyrics
+    await api(`/api/songs/${target.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+    // 리스트 인플레이스 갱신 — 스크롤/필터 보존
+    const idx = songs.value.findIndex((s: any) => s.id === target.id)
+    if (idx >= 0) {
+      const cur = songs.value[idx]
+      songs.value[idx] = {
+        ...cur,
+        title,
+        keys: [...editForm.value.keys],
+        tempo: editForm.value.tempo || null,
+        ...(editShowLyrics.value ? { lyrics: editForm.value.lyrics } : {}),
+      }
+    }
+    closeEdit()
+  } catch (e: any) {
+    alert(e.message || '저장 실패')
+  }
+  editSaving.value = false
+}
+
 async function deleteSong(e: Event, songId: string, title: string) {
   e.preventDefault(); e.stopPropagation()
   if (!confirm(`"${title}" 곡을 삭제하시겠습니까?`)) return
@@ -240,10 +306,70 @@ onMounted(async () => {
             <span v-if="!(s.refs_by_team || []).length" class="ref-count">레퍼런스 없음</span>
           </div>
         </NuxtLink>
-        <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
+        <div v-if="isAdmin" class="card-actions">
+          <button class="btn-sm" @click="openEdit($event, s)">편집</button>
+          <button class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
+        </div>
       </div>
       </template>
     </div>
+
+    <!-- 빠른 편집 모달 -->
+    <Teleport to="body">
+      <div v-if="editingSong" class="modal-overlay" @click.self="closeEdit">
+        <div class="modal-panel">
+          <div class="modal-header">
+            <h3>곡 편집</h3>
+            <button class="btn-sm" @click="closeEdit">닫기</button>
+          </div>
+
+          <label class="field-label">제목</label>
+          <input v-model="editForm.title" class="input" />
+
+          <label class="field-label">키 (복수 선택)</label>
+          <div class="key-chips">
+            <button
+              v-for="k in COMMON_KEYS" :key="k"
+              type="button"
+              :class="['key-chip', { selected: editForm.keys.includes(k) }]"
+              @click="toggleEditKey(k)"
+            >{{ k }}</button>
+          </div>
+
+          <label class="field-label">빠르기</label>
+          <div class="tempo-row">
+            <button
+              type="button"
+              :class="['tempo-btn', { active: editForm.tempo === 'FAST' }]"
+              @click="editForm.tempo = editForm.tempo === 'FAST' ? '' : 'FAST'"
+            >빠른곡</button>
+            <button
+              type="button"
+              :class="['tempo-btn slow', { active: editForm.tempo === 'SLOW' }]"
+              @click="editForm.tempo = editForm.tempo === 'SLOW' ? '' : 'SLOW'"
+            >느린곡</button>
+          </div>
+
+          <button class="lyrics-toggle" @click="editShowLyrics = !editShowLyrics">
+            {{ editShowLyrics ? '가사 접기' : '가사 편집' }}
+          </button>
+          <textarea
+            v-if="editShowLyrics"
+            v-model="editForm.lyrics"
+            class="textarea"
+            rows="8"
+            placeholder="[Verse 1]&#10;가사..."
+          />
+
+          <div class="modal-actions">
+            <button class="btn-accent" :disabled="editSaving" @click="saveEdit">
+              {{ editSaving ? '저장 중...' : '저장' }}
+            </button>
+            <NuxtLink :to="`/songs/${editingSong.id}`" class="btn">상세 페이지</NuxtLink>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <div v-if="!loading && songs.length < total && !groupDuplicates" class="load-more-wrap">
       <button class="btn load-more" :disabled="loadingMore" @click="loadMore">
@@ -422,6 +548,57 @@ onMounted(async () => {
   cursor: pointer; flex-shrink: 0;
   &:hover { background: rgba(255,255,255,0.05); }
   &.danger { color: var(--red); &:hover { background: var(--red-soft); } }
+}
+
+.card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* 빠른 편집 모달 */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal-panel {
+  @include card;
+  background: var(--bg);
+  width: 100%; max-width: 520px;
+  max-height: 85vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 20px;
+}
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+  h3 { margin: 0; font-size: 16px; font-weight: 700; }
+}
+.field-label {
+  font-size: 12px; font-weight: 600; color: var(--text-dim); margin-top: 6px;
+}
+.key-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.key-chip {
+  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02); color: var(--text-dim);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  &.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+}
+.tempo-row { display: flex; gap: 8px; }
+.lyrics-toggle {
+  background: none; border: none; color: var(--text-dim); font-size: 12px;
+  cursor: pointer; padding: 4px 0; text-align: left; margin-top: 4px;
+  &:hover { color: var(--accent); }
+}
+.textarea {
+  @include input;
+  height: auto; padding: 12px 14px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px; line-height: 1.7;
+}
+.modal-actions {
+  display: flex; gap: 8px; margin-top: 12px;
+  .btn { @include btn; }
 }
 
 // 선택 액션 바
