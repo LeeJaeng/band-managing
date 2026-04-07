@@ -233,7 +233,11 @@ onMounted(async () => {
             <span v-if="s.default_key" class="key-badge">{{ s.default_key }}</span>
             <span v-for="k in (s.keys || []).filter((k:string) => k !== s.default_key)" :key="k" class="key-badge dim">{{ k }}</span>
             <span v-if="s.tempo" :class="['tempo-badge', s.tempo.toLowerCase()]">{{ s.tempo === 'FAST' ? '빠른곡' : '느린곡' }}</span>
-            <span class="ref-count">레퍼런스 {{ s.ref_count || 0 }}개</span>
+            <span
+              v-for="t in (s.refs_by_team || [])" :key="t.channel_id || 'none'"
+              class="team-tag"
+            >{{ t.channel_name }} {{ t.count }}</span>
+            <span v-if="!(s.refs_by_team || []).length" class="ref-count">레퍼런스 없음</span>
           </div>
         </NuxtLink>
         <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
@@ -406,6 +410,11 @@ onMounted(async () => {
   &.slow { background: rgba(80,150,255,0.15); color: #5096ff; }
 }
 .ref-count { font-size: 12px; }
+.team-tag {
+  background: rgba(255,255,255,0.05); color: var(--text-dim);
+  padding: 1px 8px; border-radius: 6px; font-size: 11px;
+  border: 1px solid var(--line);
+}
 
 .btn-sm {
   padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line);

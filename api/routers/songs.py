@@ -69,7 +69,7 @@ def list_songs(
     user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    from models import SongReference as _SR
+    from models import SongReference as _SR, CrawlChannel as _CH
     query = db.query(Song)
     if source:
         query = query.filter(Song.source == source)
@@ -118,6 +118,25 @@ def list_songs(
         query.options(joinedload(Song.references))
         .order_by(Song.title).offset(offset).limit(limit).all()
     )
+
+    # 채널 id → name 매핑 (한 번만 조회)
+    channel_map = {c.id: c.name for c in db.query(_CH.id, _CH.name).all()}
+
+    def _ref_by_team(refs):
+        counts: dict[str | None, int] = {}
+        for r in refs:
+            counts[r.channel_id] = counts.get(r.channel_id, 0) + 1
+        result = []
+        for cid, count in counts.items():
+            result.append({
+                "channel_id": cid,
+                "channel_name": channel_map.get(cid) if cid else "기타",
+                "count": count,
+            })
+        # 개수 많은 순 → 이름 순
+        result.sort(key=lambda x: (-x["count"], x["channel_name"] or ""))
+        return result
+
     return {
         "total": total,
         "items": [
@@ -130,6 +149,7 @@ def list_songs(
                 "tempo": s.tempo,
                 "source": s.source,
                 "ref_count": len(s.references),
+                "refs_by_team": _ref_by_team(s.references),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in songs
