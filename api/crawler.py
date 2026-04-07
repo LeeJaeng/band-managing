@@ -10,7 +10,15 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from models import CrawlChannel, CrawlLog, Song, SongReference, ReviewQueue, CrawlFilterKeyword
+from models import (
+    CrawlChannel,
+    CrawlLog,
+    CrawlFilterKeyword,
+    ReviewQueue,
+    Song,
+    SongReference,
+    SongSheet,
+)
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
@@ -44,8 +52,51 @@ TEAM_NAMES = [
     "ciy", "cgn",
 ]
 
-# 키 감지 패턴
-KEY_PATTERN = re.compile(r"keys?\s*[:\-]?\s*([A-G][#b]?m?)", re.IGNORECASE)
+# 키 감지 패턴 — 영어/한국어 키워드 + 장조/단조
+KEY_PATTERN = re.compile(
+    r"(?:keys?|키|코드)\s*[:\-]?\s*([A-G][#b\u266d\u266f]?m?)(?![a-zA-Z])"
+    r"|\b([A-G][#b]?)\s*(?:장조|단조)",
+    re.IGNORECASE,
+)
+
+# 세트리스트(예배 실황) 감지 — 긴 영상 중 어떤 것에서 description 파싱할지 판단
+WORSHIP_VIDEO_KEYWORDS = [
+    "예배", "worship", "목요", "주일", "thursday", "sunday",
+    "라이브", "live", "집회", "service", "찬양집회",
+]
+
+# "00:00 곡명" / "1:23:45 곡명" — 줄 시작 타임스탬프
+SETLIST_TIMESTAMP = re.compile(r"^\s*[\[\(]?(\d{1,2}:\d{2}(?::\d{2})?)[\]\)]?\s+(.+?)\s*$")
+
+# 라인 안 어디에서나 키 추출 — (Key: G) / | key Am / (G) / G장조 / "곡 - Am"
+SETLIST_KEY = re.compile(
+    r"(?:\bkeys?|키|코드)\s*[:\-]?\s*([A-G][#b\u266d\u266f]?m?)(?![a-zA-Z])"
+    r"|[\(\[]\s*([A-G][#b\u266d\u266f]?m?)\s*[\)\]]"
+    r"|\b([A-G][#b]?)\s*(?:장조|단조)"
+    r"|[\|\-–—]\s*([A-G][#b\u266d\u266f]?m?)\s*$",
+    re.IGNORECASE,
+)
+
+# URL 추출
+URL_PATTERN = re.compile(r"https?://[^\s\)\]\>\"']+", re.IGNORECASE)
+
+# 악보 링크 휴리스틱: 도메인/경로/파일명에 이런 토큰이 있으면 악보 후보
+SHEET_URL_HINTS = [
+    "sheet", "sheetmusic", "악보", "praise", "chord", "score",
+    "mssaint", "mss", "musicgroups", "praisecho",
+]
+SHEET_DRIVE_HOSTS = [
+    "drive.google.com/file", "drive.google.com/open",
+    "dropbox.com/s", "1drv.ms",
+]
+# 악보 링크와 같은 줄에 있어야 추가 인정되는 키워드
+SHEET_LINE_KEYWORDS = ["악보", "sheet", "chord chart", "코드", "score", "lead sheet"]
+
+# 가사 마커 — 이 라인 이후를 가사 블록으로 인식
+LYRICS_MARKERS = re.compile(
+    r"^\s*(?:\[?\s*(?:가사|lyrics?)\s*\]?\s*[:\-]?\s*)$",
+    re.IGNORECASE,
+)
 
 # 긴 영상 제외 키워드 (예배 실황 등)
 SKIP_KEYWORDS = [
@@ -102,10 +153,20 @@ def parse_song_title(video_title: str) -> str:
     return title if title else video_title.strip()
 
 
+def _normalize_key(raw: str) -> str:
+    """유니코드 ♭/♯을 b/#으로 정규화."""
+    return raw.replace("\u266d", "b").replace("\u266f", "#").strip()
+
+
 def detect_key(text: str) -> str | None:
     """텍스트에서 키 정보를 추출."""
     match = KEY_PATTERN.search(text)
-    return match.group(1) if match else None
+    if not match:
+        return None
+    for grp in match.groups():
+        if grp:
+            return _normalize_key(grp)
+    return None
 
 
 def should_skip_video(title: str, extra_keywords: list[str] | None = None) -> bool:
@@ -145,6 +206,204 @@ def find_matching_song(parsed_title: str, db: Session) -> Song | None:
         return exact
     like = db.query(Song).filter(Song.title.ilike(f"%{parsed_title}%")).first()
     return like
+
+
+# ── 세트리스트 / description 보강 파서 ──────────────────────
+
+def _ts_to_seconds(ts: str) -> int:
+    """'1:23:45' / '05:30' → 초."""
+    parts = [int(p) for p in ts.split(":")]
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    return 0
+
+
+def _strip_setlist_title(raw: str, key_match: re.Match | None) -> str:
+    """세트리스트 라인에서 키 표기를 제거하고 곡명만 남긴다."""
+    title = raw
+    if key_match:
+        title = title.replace(key_match.group(0), "")
+    # 끝부분 구분자 정리
+    title = re.sub(r"\s*[\|\-–—:·,/]\s*$", "", title)
+    title = title.strip(" -–—·|,.\"'()[]")
+    return title
+
+
+def parse_setlist_description(description: str) -> list[dict]:
+    """description에서 [{title, key, ts_seconds}] 추출. 키가 없는 라인은 제외."""
+    if not description:
+        return []
+    results: list[dict] = []
+    seen_titles: set[str] = set()
+    for line in description.splitlines():
+        m = SETLIST_TIMESTAMP.match(line)
+        if not m:
+            continue
+        ts, rest = m.group(1), m.group(2)
+        key_match = SETLIST_KEY.search(rest)
+        if not key_match:
+            continue
+        key = None
+        for grp in key_match.groups():
+            if grp:
+                key = _normalize_key(grp)
+                break
+        if not key:
+            continue
+        title = _strip_setlist_title(rest, key_match)
+        if not title or len(title) < 2:
+            continue
+        # 중복 제거
+        dedup_key = title.lower()
+        if dedup_key in seen_titles:
+            continue
+        seen_titles.add(dedup_key)
+        results.append({
+            "title": title,
+            "key": key,
+            "ts_seconds": _ts_to_seconds(ts),
+        })
+    return results
+
+
+def _augment_song_keys(song: Song, key: str) -> bool:
+    """song.keys 리스트에 key를 중복 없이 추가. default_key가 null이면 같이 set.
+
+    반환: 변경 발생 여부.
+    """
+    if not key:
+        return False
+    changed = False
+    existing = list(song.keys or [])
+    if key not in existing:
+        existing.append(key)
+        song.keys = existing
+        changed = True
+    if not song.default_key:
+        song.default_key = key
+        changed = True
+    return changed
+
+
+def parse_lyrics_from_description(desc: str) -> str | None:
+    """description에서 가사 블록을 추출.
+
+    1) 명시 마커('가사', 'Lyrics') 라인 이후 → 빈 줄 2개 또는 URL 만나기 전까지
+    2) 마커 없으면 fallback: 한글 비율 ≥ 0.5, 줄 수 ≥ 6, 평균 줄 길이 ≤ 40 인 블록
+    3) 길이 40자 미만이면 None
+    """
+    if not desc:
+        return None
+
+    lines = desc.splitlines()
+
+    def _collect_block(start: int) -> str:
+        block: list[str] = []
+        blank_streak = 0
+        for line in lines[start:]:
+            if URL_PATTERN.search(line):
+                break
+            if not line.strip():
+                blank_streak += 1
+                if blank_streak >= 2:
+                    break
+                if block:
+                    block.append("")
+                continue
+            blank_streak = 0
+            block.append(line.rstrip())
+        return "\n".join(block).strip()
+
+    # 1) 명시 마커
+    for i, line in enumerate(lines):
+        if LYRICS_MARKERS.match(line):
+            text = _collect_block(i + 1)
+            if len(text) >= 40:
+                return text
+
+    # 2) 휴리스틱: 가장 큰 한글 블록을 추정
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if not line.strip() or URL_PATTERN.search(line) or SETLIST_TIMESTAMP.match(line):
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        current.append(line.rstrip())
+    if current:
+        blocks.append(current)
+
+    best: tuple[int, str] | None = None
+    for block in blocks:
+        if len(block) < 6:
+            continue
+        text = "\n".join(block)
+        korean = sum(1 for ch in text if "\uac00" <= ch <= "\ud7a3")
+        non_space = sum(1 for ch in text if not ch.isspace())
+        if non_space == 0 or korean / non_space < 0.5:
+            continue
+        avg_len = sum(len(line) for line in block) / len(block)
+        if avg_len > 40:
+            continue
+        if len(text) < 40:
+            continue
+        if best is None or len(text) > best[0]:
+            best = (len(text), text)
+
+    return best[1] if best else None
+
+
+def parse_sheet_urls(desc: str) -> list[str]:
+    """description에서 악보 링크 후보 URL을 추출 (휴리스틱)."""
+    if not desc:
+        return []
+    found: list[str] = []
+    for line in desc.splitlines():
+        line_lower = line.lower()
+        line_has_keyword = any(kw in line_lower for kw in SHEET_LINE_KEYWORDS)
+        for url in URL_PATTERN.findall(line):
+            url_clean = url.rstrip(".,;)]")
+            url_lower = url_clean.lower()
+            looks_like_sheet = (
+                url_lower.endswith(".pdf")
+                or any(h in url_lower for h in SHEET_URL_HINTS)
+            )
+            looks_like_drive = any(h in url_lower for h in SHEET_DRIVE_HOSTS)
+            if looks_like_sheet or (looks_like_drive and line_has_keyword) or (line_has_keyword and url_lower.startswith("http")):
+                if url_clean not in found:
+                    found.append(url_clean)
+                if len(found) >= 5:
+                    return found
+    return found
+
+
+def _sheet_file_type(url: str) -> str:
+    lower = url.lower()
+    if lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return "IMAGE"
+    return "PDF"
+
+
+def _add_sheet(db: Session, song: Song, reference: SongReference | None, file_url: str) -> bool:
+    """SongSheet 생성. 동일 (song_id, file_url) 존재하면 skip."""
+    exists = db.query(SongSheet).filter(
+        SongSheet.song_id == song.id,
+        SongSheet.file_url == file_url,
+    ).first()
+    if exists:
+        return False
+    sheet = SongSheet(
+        song_id=song.id,
+        reference_id=reference.id if reference else None,
+        file_url=file_url,
+        file_type=_sheet_file_type(file_url),
+        uploaded_by="crawler",
+    )
+    db.add(sheet)
+    return True
 
 
 def _resolve_channel_id(youtube, channel_id_or_handle: str) -> str:
@@ -261,6 +520,174 @@ def _fetch_channel_videos(channel_id_or_handle: str, known_video_ids: set[str] |
     return videos
 
 
+def _fetch_worship_videos(channel_id_or_handle: str, max_results: int = 10) -> list[dict]:
+    """예배 실황 영상(긴 영상 + 예배 키워드)만 수집해 description 포함 반환."""
+    if not YOUTUBE_API_KEY:
+        return []
+
+    from googleapiclient.discovery import build
+
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+
+    resolved_id = _resolve_channel_id(youtube, channel_id_or_handle)
+    uploads_playlist_id = "UU" + resolved_id[2:]
+
+    # 1단계: 영상 ID 후보 수집 (최신순) — quota 절약 위해 일정 개수 모이면 중단
+    video_ids: list[str] = []
+    next_page = None
+    while len(video_ids) < max_results * 5:  # 후보를 넉넉히
+        req = youtube.playlistItems().list(
+            playlistId=uploads_playlist_id,
+            part="contentDetails",
+            maxResults=50,
+            pageToken=next_page,
+        )
+        resp = req.execute()
+        for item in resp.get("items", []):
+            video_ids.append(item["contentDetails"]["videoId"])
+        next_page = resp.get("nextPageToken")
+        if not next_page:
+            break
+
+    if not video_ids:
+        return []
+
+    videos: list[dict] = []
+    for i in range(0, len(video_ids), 50):
+        if len(videos) >= max_results:
+            break
+        batch = video_ids[i:i+50]
+        detail_resp = youtube.videos().list(
+            part="snippet,contentDetails",
+            id=",".join(batch),
+        ).execute()
+        for item in detail_resp.get("items", []):
+            duration = _parse_duration(item["contentDetails"]["duration"])
+            # 예배 실황은 보통 30분 이상이지만 보수적으로 MAX_DURATION 초과만 받음
+            if duration <= MAX_DURATION_SECONDS:
+                continue
+            snippet = item["snippet"]
+            title = snippet["title"]
+            lower = title.lower()
+            if not any(kw.lower() in lower for kw in WORSHIP_VIDEO_KEYWORDS):
+                continue
+            videos.append({
+                "video_id": item["id"],
+                "title": title,
+                "description": snippet.get("description", ""),
+                "thumbnail": snippet["thumbnails"].get("high", {}).get("url", ""),
+                "published_at": snippet["publishedAt"],
+                "duration": duration,
+            })
+            if len(videos) >= max_results:
+                break
+
+    return videos
+
+
+def crawl_setlists(channel: CrawlChannel, db: Session, max_videos: int = 10) -> dict:
+    """예배 실황 영상의 description에서 세트리스트를 추출해 곡 DB / 레퍼런스 보강."""
+    log = CrawlLog(
+        channel_id=channel.id,
+        status="RUNNING",
+        started_at=datetime.utcnow(),
+    )
+    db.add(log)
+    db.flush()
+
+    try:
+        videos = _fetch_worship_videos(channel.youtube_channel_id, max_results=max_videos)
+        log.videos_found = len(videos)
+
+        songs_created = 0
+        keys_added = 0
+        refs_added = 0
+
+        for video in videos:
+            entries = parse_setlist_description(video["description"])
+            if not entries:
+                continue
+
+            for entry in entries:
+                title = entry["title"]
+                key = entry["key"]
+                ts = entry["ts_seconds"]
+
+                song = find_matching_song(title, db)
+                if song is None:
+                    song = Song(
+                        title=title,
+                        source="CRAWLED",
+                        default_key=key,
+                        keys=[key],
+                    )
+                    db.add(song)
+                    db.flush()
+                    songs_created += 1
+                else:
+                    if _augment_song_keys(song, key):
+                        keys_added += 1
+
+                # 타임스탬프 ref — youtube_video_id는 'VIDEOID@초'로 합성
+                synthetic_vid = f"{video['video_id']}@{ts}"
+                exists_ref = db.query(SongReference).filter(
+                    SongReference.youtube_video_id == synthetic_vid
+                ).first()
+                if exists_ref:
+                    continue
+
+                ref = SongReference(
+                    song_id=song.id,
+                    channel_id=channel.id,
+                    youtube_url=f"https://www.youtube.com/watch?v={video['video_id']}&t={ts}s",
+                    youtube_video_id=synthetic_vid,
+                    title=f"{video['title']} — {title}",
+                    thumbnail_url=video["thumbnail"],
+                    key=key,
+                    trust_level=channel.trust_level,
+                    source="CRAWL",
+                )
+                db.add(ref)
+                refs_added += 1
+
+        log.songs_added = songs_created
+        log.refs_added = refs_added
+        log.status = "SUCCESS"
+        log.finished_at = datetime.utcnow()
+        channel.last_crawled_at = datetime.utcnow()
+        db.commit()
+
+        return {
+            "channel_id": channel.id,
+            "channel_name": channel.name,
+            "status": "SUCCESS",
+            "videos_scanned": log.videos_found,
+            "songs_created": songs_created,
+            "keys_added": keys_added,
+            "refs_added": refs_added,
+        }
+    except Exception as e:
+        try:
+            db.rollback()
+            fail_log = CrawlLog(
+                channel_id=channel.id,
+                status="FAILED",
+                error_message=str(e),
+                started_at=datetime.utcnow(),
+                finished_at=datetime.utcnow(),
+            )
+            db.add(fail_log)
+            db.commit()
+        except Exception:
+            db.rollback()
+        return {
+            "channel_id": channel.id,
+            "channel_name": channel.name,
+            "status": "FAILED",
+            "error": str(e),
+        }
+
+
 def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
     """단일 채널 크롤링 실행."""
     log = CrawlLog(
@@ -323,7 +750,19 @@ def crawl_channel(channel: CrawlChannel, db: Session) -> dict:
                     source="CRAWL",
                 )
                 db.add(ref)
+                db.flush()  # ref.id 확보 (SongSheet 연결용)
                 refs_added += 1
+
+                # ── description 보강: 키 / 가사 / 악보 ──
+                if detected_key:
+                    _augment_song_keys(matching_song, detected_key)
+
+                lyrics = parse_lyrics_from_description(video["description"])
+                if lyrics and not matching_song.lyrics:
+                    matching_song.lyrics = lyrics
+
+                for sheet_url in parse_sheet_urls(video["description"]):
+                    _add_sheet(db, matching_song, ref, sheet_url)
             else:
                 rq = ReviewQueue(
                     youtube_video_id=video["video_id"],

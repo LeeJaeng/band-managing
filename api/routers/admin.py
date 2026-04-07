@@ -167,6 +167,56 @@ def crawl_channel(channel_id: str, _: User = Depends(require_admin), db: Session
         }
 
 
+# ── Setlist crawl (예배 실황 description 파싱) ──────────
+
+@router.post("/crawl-setlists/all")
+def crawl_setlists_all(
+    max_videos: int = 10,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """활성 채널의 예배 실황 영상에서 세트리스트를 추출해 곡/키/레퍼런스 보강."""
+    channels = db.query(CrawlChannel).filter(CrawlChannel.is_active == True).all()
+    from crawler import crawl_setlists as do_setlists
+    results = []
+    for ch in channels:
+        try:
+            results.append(do_setlists(ch, db, max_videos=max_videos))
+        except Exception as e:
+            db.rollback()
+            results.append({
+                "channel_id": ch.id,
+                "channel_name": ch.name,
+                "status": "FAILED",
+                "error": str(e),
+            })
+    return {"channels_crawled": len(results), "results": results}
+
+
+@router.post("/crawl-setlists/{channel_id}")
+def crawl_setlists_one(
+    channel_id: str,
+    max_videos: int = 10,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """특정 채널의 예배 실황 세트리스트만 크롤."""
+    ch = db.query(CrawlChannel).filter(CrawlChannel.id == channel_id).first()
+    if not ch:
+        raise HTTPException(404, "Channel not found")
+    try:
+        from crawler import crawl_setlists as do_setlists
+        return do_setlists(ch, db, max_videos=max_videos)
+    except Exception as e:
+        db.rollback()
+        return {
+            "channel_id": ch.id,
+            "channel_name": ch.name,
+            "status": "FAILED",
+            "error": str(e),
+        }
+
+
 # ── Crawl logs ─────────────────────────────────────────
 
 @router.get("/crawl/logs")
