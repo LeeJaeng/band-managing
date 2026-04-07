@@ -751,9 +751,10 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
             continue
         # 그룹 대표 normalized: 가장 짧은 것 (가장 일반적인 접두)
         norm = min(norm_lookup[m.id] for m in members)
-        # keep 후보: ref_count 많은 순 → 길이 긴 순 → 오래된 순
+        # keep 후보: 키 있는 곡 우선 → ref_count 많은 순 → 제목 긴 순 → 오래된 순
         members.sort(
             key=lambda s: (
+                0 if s.default_key else 1,
                 -ref_counts.get(s.id, 0),
                 -len(s.title or ""),
                 s.created_at or datetime.min,
