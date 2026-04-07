@@ -24,7 +24,7 @@ function toggleSelect(id: string) {
   if (idx >= 0) selected.value.splice(idx, 1)
   else selected.value.push(id)
 }
-function clearSelection() { selected.value = [] }
+function clearSelection() { selected.value = []; bulkMode.value = null; mergeTarget.value = null }
 
 const selectedSongs = computed(() => songs.value.filter(s => isSelected(s.id)))
 
@@ -54,7 +54,7 @@ async function doMerge() {
 }
 
 // 일괄 편집 모드
-const bulkMode = ref<'merge' | 'edit'>('merge')
+const bulkMode = ref<'merge' | 'edit' | null>(null)
 const bulkKeys = ref<string[]>([])
 const bulkTempo = ref('')
 const bulkBusy = ref(false)
@@ -182,16 +182,33 @@ onMounted(async () => {
     <Teleport to="body">
       <div v-if="isAdmin && selected.length >= 2" class="action-bar">
         <div class="action-bar-header">
-          <span class="action-bar-label">{{ selected.length }}개 선택됨</span>
-          <div class="action-bar-tabs">
-            <button :class="['tab-btn', { active: bulkMode === 'merge' }]" @click="bulkMode = 'merge'">병합</button>
-            <button :class="['tab-btn', { active: bulkMode === 'edit' }]" @click="bulkMode = 'edit'">일괄 편집</button>
-          </div>
+          <button v-if="bulkMode" class="back-btn" @click="bulkMode = null">←</button>
+          <span class="action-bar-label">
+            {{ bulkMode === 'merge' ? '병합' : bulkMode === 'edit' ? '일괄 편집' : `${selected.length}개 선택됨` }}
+          </span>
           <button class="action-bar-close" @click="clearSelection">✕</button>
         </div>
 
-        <!-- 병합 탭 -->
-        <div v-if="bulkMode === 'merge'" class="merge-panel">
+        <!-- 초기: 무엇을 할지 선택 -->
+        <div v-if="!bulkMode" class="mode-select">
+          <button class="mode-btn" @click="bulkMode = 'merge'">
+            <span class="mode-icon">🔀</span>
+            <span class="mode-text">
+              <strong>병합</strong>
+              <small>중복된 곡을 하나로 합치기</small>
+            </span>
+          </button>
+          <button class="mode-btn" @click="bulkMode = 'edit'">
+            <span class="mode-icon">✏️</span>
+            <span class="mode-text">
+              <strong>일괄 편집</strong>
+              <small>키 추가, 빠르기 설정</small>
+            </span>
+          </button>
+        </div>
+
+        <!-- 병합 -->
+        <div v-else-if="bulkMode === 'merge'" class="merge-panel">
           <p class="panel-hint">남길 곡을 클릭하여 선택하세요. 나머지는 삭제됩니다.</p>
           <div class="merge-songs">
             <div
@@ -209,7 +226,7 @@ onMounted(async () => {
           </button>
         </div>
 
-        <!-- 일괄 편집 탭 -->
+        <!-- 일괄 편집 -->
         <div v-else class="edit-panel">
           <div class="edit-section">
             <p class="panel-hint">추가할 키 선택 (기존 키에 추가됩니다)</p>
@@ -258,8 +275,8 @@ onMounted(async () => {
 }
 .filter-select {
   @include input;
-  width: auto; height: auto;
-  padding: 7px 10px; font-size: 13px;
+  width: auto; height: 38px;
+  padding: 0 10px; font-size: 13px;
   appearance: auto; flex: 0 0 auto;
 }
 .filter-reset {
@@ -322,18 +339,32 @@ onMounted(async () => {
 }
 
 .action-bar-header {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
 }
 .action-bar-label { font-size: 13px; font-weight: 700; flex: 1; }
 .action-bar-close {
   background: none; border: none; color: var(--text-dim); font-size: 14px; cursor: pointer;
   &:hover { color: var(--text); }
 }
-.action-bar-tabs { display: flex; gap: 4px; }
-.tab-btn {
-  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line);
-  background: none; font-size: 12px; cursor: pointer; color: var(--text-dim);
-  &.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.back-btn {
+  background: none; border: none; color: var(--text-dim); font-size: 16px;
+  cursor: pointer; padding: 0 4px;
+  &:hover { color: var(--text); }
+}
+
+.mode-select { display: flex; flex-direction: column; gap: 8px; }
+.mode-btn {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02); cursor: pointer; text-align: left;
+  transition: all .15s;
+  &:hover { border-color: var(--accent); background: var(--accent-soft); }
+}
+.mode-icon { font-size: 20px; flex-shrink: 0; }
+.mode-text {
+  display: flex; flex-direction: column; gap: 2px;
+  strong { font-size: 14px; color: var(--text); }
+  small { font-size: 12px; color: var(--text-dim); }
 }
 
 .panel-hint { font-size: 12px; color: var(--text-dim); margin: 0 0 8px; }
