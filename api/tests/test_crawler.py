@@ -105,6 +105,21 @@ def test_parse_keep_english_only_title():
     assert parse_song_title("Holy Forever") == "Holy Forever"
 
 
+def test_parse_strip_numbering_prefix():
+    assert parse_song_title("5. 거룩 영원히 Holy Forever") == "거룩 영원히"
+    assert parse_song_title("10. 시편 139편 Psalm 139") == "시편 139편"
+    assert parse_song_title("1.RE_ 주님의 임재를_Your Presence") == "주님의 임재를"
+
+
+def test_parse_keep_korean_with_digit():
+    # 점/괄호 없이 숫자만 시작하는 제목은 보존
+    assert parse_song_title("1년 후에") == "1년 후에"
+
+
+def test_parse_english_with_comma_apostrophe():
+    assert parse_song_title("내 영혼이 은총 입어 Where Jesus is, 'tis heaven") == "내 영혼이 은총 입어"
+
+
 # ── 합쳐진 곡 필터 ──
 
 def test_skip_plus_songs():

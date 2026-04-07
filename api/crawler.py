@@ -138,6 +138,8 @@ MULTI_SONG_PATTERNS = [
 def parse_song_title(video_title: str) -> str:
     """영상 제목에서 곡 제목을 추출."""
     title = video_title.strip()
+    # 선두 번호 매기기 제거: "1.", "10.", "1)", "1.RE_" — 셋다 점/괄호가 있어야 안전
+    title = re.sub(r"^\s*\d{1,2}\s*[.)]\s*(?:[A-Z]+_)?\s*", "", title)
     for pattern in STRIP_PATTERNS:
         title = re.sub(pattern, "", title, flags=re.IGNORECASE)
     # 사역팀 이름 제거
@@ -156,9 +158,9 @@ def parse_song_title(video_title: str) -> str:
     if re.search(r"[가-힣]", title):
         # 1) 끝의 영어를 포함한 괄호 부제 (콤마/구두점 가능): "(Fill my cup, Lord)"
         title = re.sub(r"\s*\([^)]*[A-Za-z][^)]*\)\s*$", "", title)
-        # 2) 끝의 단순 영어 부제: "Holy Forever" / "Psalm 139" / "( My Hope ..."
+        # 2) 끝의 단순 영어 부제: "Holy Forever" / "Psalm 139" / "Where Jesus is, 'tis heaven"
         title = re.sub(
-            r"\s*\(?\s*[A-Za-z][A-Za-z\d\s'’&]*\)?\s*$",
+            r"\s*\(?\s*[A-Za-z][A-Za-z\d\s'’&,.]*\)?\s*$",
             "",
             title,
         ).strip()
@@ -245,13 +247,11 @@ def _strip_setlist_title(raw: str, key_match: re.Match | None) -> str:
     title = raw
     if key_match:
         title = title.replace(key_match.group(0), "")
-    # 선두 번호 매기기 제거: "1.", "10.", "1)", "1.RE_", "1. RE "
-    title = re.sub(r"^\s*\d+\s*[.)]\s*(?:[A-Z]+_)?\s*", "", title)
     # 언더스코어를 공백으로 (영문 부제 분리 도움)
     title = title.replace("_", " ")
     # 끝부분 구분자 정리
     title = re.sub(r"\s*[\|\-–—:·,/]\s*$", "", title)
-    # 일반 곡 제목 정리(팀명/인도자/영문부제) 재사용
+    # 일반 곡 제목 정리(번호/팀명/인도자/영문부제) 재사용
     title = parse_song_title(title)
     return title
 

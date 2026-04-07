@@ -201,12 +201,11 @@ function closeRecleanModal() {
 async function applyReclean() {
   if (!recleanPreview.value) return
   const t = recleanPreview.value.title_changes_total
-  const r = recleanPreview.value.refs_to_delete_total
-  if (!confirm(`제목 변경 ${t}건 + 레퍼런스 삭제 ${r}건을 실제 적용합니다.\n(이후 고아 CRAWLED 곡은 자동 삭제)\n계속하시겠습니까?`)) return
+  if (!confirm(`제목 변경 ${t}건을 실제 적용합니다.\n계속하시겠습니까?`)) return
   recleanApplying.value = true
   try {
     const res = await api<any>(`/api/admin/songs/reclean?dry_run=false`, { method: 'POST' })
-    alert(`적용 완료!\n제목 변경: ${res.title_changes}\n레퍼런스 삭제: ${res.refs_deleted}\n고아 곡 삭제: ${res.orphans_deleted}`)
+    alert(`적용 완료!\n제목 변경: ${res.title_changes}건`)
     closeRecleanModal()
     await load()
   } catch (e: any) {
@@ -876,9 +875,8 @@ onMounted(load)
           <div v-else-if="recleanPreview" class="dup-group-list">
             <div class="reclean-summary">
               <div>제목 변경 후보: <strong>{{ recleanPreview.title_changes_total }}</strong>건</div>
-              <div>레퍼런스 삭제 후보: <strong>{{ recleanPreview.refs_to_delete_total }}</strong>건 (Shorts/inst/MR 등)</div>
               <div class="dup-empty" style="padding: 8px 0; font-size: 12px;">
-                * 적용 후 ref 0개가 되는 CRAWLED 곡은 자동 삭제됩니다.
+                * source=CRAWLED 곡만 대상. 수동 곡과 레퍼런스는 건드리지 않음.
               </div>
             </div>
 
@@ -893,19 +891,10 @@ onMounted(load)
               </div>
             </div>
 
-            <div v-if="recleanPreview.refs_to_delete?.length" class="dup-group">
-              <div class="dup-group-title">레퍼런스 삭제 (앞 100건)</div>
-              <div class="reclean-list">
-                <div v-for="r in recleanPreview.refs_to_delete" :key="r.id" class="reclean-row">
-                  <span class="reclean-old">{{ r.title }}</span>
-                </div>
-              </div>
-            </div>
-
             <div class="dup-group-actions" style="margin-top: 12px;">
               <button
                 class="btn-accent"
-                :disabled="recleanApplying || (recleanPreview.title_changes_total === 0 && recleanPreview.refs_to_delete_total === 0)"
+                :disabled="recleanApplying || recleanPreview.title_changes_total === 0"
                 @click="applyReclean"
               >
                 {{ recleanApplying ? '적용 중...' : '실제 적용' }}

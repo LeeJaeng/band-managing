@@ -787,18 +787,16 @@ def reclean_songs(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """크롤된 곡과 모든 레퍼런스를 현재 parser/filter로 일괄 재정리.
+    """source=CRAWLED 곡의 title을 현재 parse_song_title로 재계산.
 
-    1) source=CRAWLED 곡의 title을 parse_song_title로 재계산 (수동 곡은 보존)
-    2) 모든 SongReference를 should_skip_video로 검사 → 필터 통과 못하면 삭제
-    3) 위 단계 후 ref가 0개 남는 CRAWLED 곡 → 삭제 (콘티 참조는 자동 정리)
+    수동 곡(MANUAL/USER)은 손대지 않음. 레퍼런스는 타임스탬프 jump 가치가
+    있을 수 있으므로 건드리지 않음 — Shorts 정리는 별도 흐름으로.
 
-    dry_run=True: 변경 예정 목록만 반환 (실제 적용 X)
+    dry_run=True: 변경 예정 목록만 반환
     dry_run=False: 실제 적용
     """
-    from crawler import parse_song_title, should_skip_video
+    from crawler import parse_song_title
 
-    # 1) 곡 제목 재계산 후보
     title_changes: list[dict] = []
     crawled_songs = db.query(Song).filter(Song.source == "CRAWLED").all()
     for s in crawled_songs:
@@ -806,81 +804,21 @@ def reclean_songs(
         if new_title and new_title != s.title:
             title_changes.append({"id": s.id, "old": s.title, "new": new_title})
 
-    # 2) 레퍼런스 필터 후보 (모든 ref 대상 — 수동/크롤 무관, ref.title이 영상 제목이므로)
-    refs_to_delete: list[dict] = []
-    all_refs = db.query(SongReference).all()
-    for r in all_refs:
-        rt = r.title or ""
-        if should_skip_video(rt):
-            refs_to_delete.append({
-                "id": r.id,
-                "title": rt,
-                "song_id": r.song_id,
-                "youtube_video_id": r.youtube_video_id,
-            })
-
     if dry_run:
         return {
             "dry_run": True,
             "title_changes_total": len(title_changes),
             "title_changes": title_changes[:100],
-            "refs_to_delete_total": len(refs_to_delete),
-            "refs_to_delete": refs_to_delete[:100],
         }
 
-    # 적용 — 제목 변경
     for chg in title_changes:
         db.query(Song).filter(Song.id == chg["id"]).update(
             {"title": chg["new"]}, synchronize_session=False
         )
-
-    # 적용 — ref 삭제
-    ref_ids = [r["id"] for r in refs_to_delete]
-    if ref_ids:
-        # 관련 sheet의 reference_id 끊기
-        db.query(SongSheet).filter(SongSheet.reference_id.in_(ref_ids)).update(
-            {"reference_id": None}, synchronize_session=False
-        )
-        db.query(SongReference).filter(SongReference.id.in_(ref_ids)).delete(
-            synchronize_session=False
-        )
-
-    db.flush()
-
-    # 고아 CRAWLED 곡 — ref 0개
-    orphan_subq = db.query(SongReference.song_id).distinct().subquery()
-    orphans = (
-        db.query(Song)
-        .filter(Song.source == "CRAWLED", ~Song.id.in_(db.query(orphan_subq.c.song_id)))
-        .all()
-    )
-    orphan_ids = [s.id for s in orphans]
-    orphans_deleted = 0
-    if orphan_ids:
-        # 콘티 항목은 NOT NULL FK라 행 자체 삭제 (delete_song 패턴과 동일)
-        db.query(ContiItem).filter(ContiItem.song_id.in_(orphan_ids)).delete(
-            synchronize_session=False
-        )
-        # review_queue.suggested_song_id는 nullable
-        db.query(ReviewQueue).filter(
-            ReviewQueue.suggested_song_id.in_(orphan_ids)
-        ).update({"suggested_song_id": None}, synchronize_session=False)
-        # 곡 자체 삭제 (남은 sheet는 cascade)
-        db.query(SongSheet).filter(SongSheet.song_id.in_(orphan_ids)).delete(
-            synchronize_session=False
-        )
-        orphans_deleted = (
-            db.query(Song).filter(Song.id.in_(orphan_ids)).delete(
-                synchronize_session=False
-            )
-        )
-
     db.commit()
     return {
         "dry_run": False,
         "title_changes": len(title_changes),
-        "refs_deleted": len(ref_ids),
-        "orphans_deleted": orphans_deleted,
     }
 
 
