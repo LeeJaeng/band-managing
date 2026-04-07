@@ -106,78 +106,194 @@ async function doBulkUpdate() {
   bulkBusy.value = false
 }
 
-// 빠른 편집 모달
-const editingSong = ref<any>(null)
-const editForm = ref({ title: '', keys: [] as string[], tempo: '', lyrics: '' })
-const editSaving = ref(false)
-const editShowLyrics = ref(false)
-
-function openEdit(e: Event, s: any) {
-  e.preventDefault(); e.stopPropagation()
-  editingSong.value = s
-  editForm.value = {
-    title: s.title || '',
-    keys: [...(s.keys || [])],
-    tempo: s.tempo || '',
-    lyrics: s.lyrics || '',
-  }
-  editShowLyrics.value = false
+// ─────────────────────────────────────────────
+// 곡 상세 모달 (편집 + 레퍼런스 + 가사 + 삭제)
+// ─────────────────────────────────────────────
+const ALL_KEYS_GROUPS = {
+  common: ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B'],
+  major: ['C#', 'Db', 'D#', 'Eb', 'F#', 'Gb', 'G#', 'Ab', 'A#'],
+  minor: ['Am', 'Bm', 'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'A#m', 'Bbm'],
 }
 
-function closeEdit() {
-  editingSong.value = null
-  editSaving.value = false
-}
+const detailSong = ref<any>(null)        // 모달에서 표시중인 풀 데이터 (refs/sheets 포함)
+const detailListIdx = ref<number>(-1)     // songs.value 내 인덱스 (인플레이스 갱신용)
+const detailLoading = ref(false)
+const detailEditing = ref(false)
+const detailForm = ref({ title: '', keys: [] as string[], tempo: '', lyrics: '' })
+const detailSaving = ref(false)
+const showAllKeys = ref(false)
+const showAddRef = ref(false)
+const newRef = ref({ youtube_url: '', title: '', key: '' })
 
-function toggleEditKey(k: string) {
-  const idx = editForm.value.keys.indexOf(k)
-  if (idx >= 0) editForm.value.keys.splice(idx, 1)
-  else editForm.value.keys.push(k)
-}
-
-async function saveEdit() {
-  if (!editingSong.value) return
-  const target = editingSong.value
-  const title = editForm.value.title.trim()
-  if (!title) { alert('제목을 입력해주세요.'); return }
-  editSaving.value = true
+async function openDetail(e: Event, s: any) {
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
+  detailListIdx.value = songs.value.findIndex((x: any) => x.id === s.id)
+  detailSong.value = { ...s, references: [], sheets: [] }
+  detailEditing.value = false
+  showAddRef.value = false
+  showAllKeys.value = false
+  detailLoading.value = true
   try {
-    const body: any = {
-      title,
-      keys: editForm.value.keys,
-      tempo: editForm.value.tempo || null,
-    }
-    // lyrics는 사용자가 펼쳐서 변경한 경우에만 전송
-    if (editShowLyrics.value) body.lyrics = editForm.value.lyrics
-    await api(`/api/songs/${target.id}`, {
+    detailSong.value = await api<any>(`/api/songs/${s.id}?_t=${Date.now()}`)
+  } catch (err: any) {
+    alert(err.message || '곡 정보 불러오기 실패')
+    closeDetail()
+  }
+  detailLoading.value = false
+}
+
+function closeDetail() {
+  detailSong.value = null
+  detailListIdx.value = -1
+  detailEditing.value = false
+  showAddRef.value = false
+}
+
+function syncListItem(patch: Record<string, any>) {
+  if (detailListIdx.value < 0) return
+  const cur = songs.value[detailListIdx.value]
+  if (!cur) return
+  songs.value[detailListIdx.value] = { ...cur, ...patch }
+}
+
+function startDetailEdit() {
+  if (!detailSong.value) return
+  detailForm.value = {
+    title: detailSong.value.title || '',
+    keys: [...(detailSong.value.keys || [])],
+    tempo: detailSong.value.tempo || '',
+    lyrics: detailSong.value.lyrics || '',
+  }
+  detailEditing.value = true
+}
+
+function toggleDetailKey(k: string) {
+  const idx = detailForm.value.keys.indexOf(k)
+  if (idx >= 0) detailForm.value.keys.splice(idx, 1)
+  else detailForm.value.keys.push(k)
+}
+
+async function saveDetailEdit() {
+  if (!detailSong.value) return
+  const title = detailForm.value.title.trim()
+  if (!title) { alert('제목을 입력해주세요.'); return }
+  detailSaving.value = true
+  try {
+    await api(`/api/songs/${detailSong.value.id}`, {
       method: 'PUT',
-      body: JSON.stringify(body),
-    })
-    // 리스트 인플레이스 갱신 — 스크롤/필터 보존
-    const idx = songs.value.findIndex((s: any) => s.id === target.id)
-    if (idx >= 0) {
-      const cur = songs.value[idx]
-      songs.value[idx] = {
-        ...cur,
+      body: JSON.stringify({
         title,
-        keys: [...editForm.value.keys],
-        tempo: editForm.value.tempo || null,
-        ...(editShowLyrics.value ? { lyrics: editForm.value.lyrics } : {}),
-      }
-    }
-    closeEdit()
+        keys: detailForm.value.keys,
+        tempo: detailForm.value.tempo || null,
+        lyrics: detailForm.value.lyrics,
+      }),
+    })
+    detailSong.value.title = title
+    detailSong.value.keys = [...detailForm.value.keys]
+    detailSong.value.tempo = detailForm.value.tempo || null
+    detailSong.value.lyrics = detailForm.value.lyrics
+    syncListItem({
+      title,
+      keys: [...detailForm.value.keys],
+      tempo: detailForm.value.tempo || null,
+      lyrics: detailForm.value.lyrics,
+    })
+    detailEditing.value = false
   } catch (e: any) {
     alert(e.message || '저장 실패')
   }
-  editSaving.value = false
+  detailSaving.value = false
 }
 
-async function deleteSong(e: Event, songId: string, title: string) {
-  e.preventDefault(); e.stopPropagation()
+// 인라인 키 토글 (편집 모드 없이)
+async function toggleKeyInline(key: string) {
+  if (!detailSong.value) return
+  const cur = [...(detailSong.value.keys || [])]
+  const idx = cur.indexOf(key)
+  if (idx >= 0) cur.splice(idx, 1)
+  else cur.push(key)
+  try {
+    await api(`/api/songs/${detailSong.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: detailSong.value.title, keys: cur }),
+    })
+    detailSong.value.keys = cur
+    syncListItem({ keys: [...cur] })
+  } catch (e: any) { alert(e.message || '키 저장 실패') }
+}
+
+async function setTempoInline(tempo: string) {
+  if (!detailSong.value) return
+  const next = detailSong.value.tempo === tempo ? null : tempo
+  try {
+    await api(`/api/songs/${detailSong.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: detailSong.value.title, keys: detailSong.value.keys || [], tempo: next }),
+    })
+    detailSong.value.tempo = next
+    syncListItem({ tempo: next })
+  } catch (e: any) { alert(e.message || '빠르기 저장 실패') }
+}
+
+function extractVideoId(url: string): string {
+  const match = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+  return match ? match[1] : ''
+}
+
+async function addReference() {
+  if (!detailSong.value || !newRef.value.youtube_url) return
+  const videoId = extractVideoId(newRef.value.youtube_url)
+  if (!videoId) { alert('유효한 유튜브 URL을 입력해주세요.'); return }
+  try {
+    await api(`/api/songs/${detailSong.value.id}/references`, {
+      method: 'POST',
+      body: JSON.stringify({
+        youtube_url: newRef.value.youtube_url,
+        youtube_video_id: videoId,
+        title: newRef.value.title || detailSong.value.title,
+        key: newRef.value.key || null,
+        source: 'MANUAL',
+        trust_level: 'HIGH',
+      }),
+    })
+    newRef.value = { youtube_url: '', title: '', key: '' }
+    showAddRef.value = false
+    // 상세 데이터만 다시 로드 (refs 동기화 위해)
+    detailSong.value = await api<any>(`/api/songs/${detailSong.value.id}?_t=${Date.now()}`)
+  } catch (e: any) { alert(e.message || '추가 실패') }
+}
+
+async function deleteReference(refId: string) {
+  if (!confirm('레퍼런스를 삭제하시겠습니까?')) return
+  try {
+    await api(`/api/songs/references/${refId}`, { method: 'DELETE' })
+    if (detailSong.value) {
+      detailSong.value.references = (detailSong.value.references || []).filter((r: any) => r.id !== refId)
+      detailSong.value.sheets = (detailSong.value.sheets || []).filter((s: any) => s.reference_id !== refId)
+    }
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
+async function deleteSheet(sheetId: string) {
+  if (!confirm('악보를 삭제하시겠습니까?')) return
+  try {
+    await api(`/api/songs/sheets/${sheetId}`, { method: 'DELETE' })
+    if (detailSong.value) {
+      detailSong.value.sheets = (detailSong.value.sheets || []).filter((s: any) => s.id !== sheetId)
+    }
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
+async function deleteSong(e: Event | null, songId: string, title: string) {
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
   if (!confirm(`"${title}" 곡을 삭제하시겠습니까?`)) return
   try {
     await api(`/api/songs/${songId}`, { method: 'DELETE' })
-    await search()
+    songs.value = songs.value.filter((s: any) => s.id !== songId)
+    total.value = Math.max(0, total.value - 1)
+    if (detailSong.value && detailSong.value.id === songId) closeDetail()
   } catch (err: any) { alert(err.message || '삭제 실패') }
 }
 
@@ -289,11 +405,12 @@ onMounted(async () => {
       <div
         class="song-card"
         :class="{ selected: isSelected(s.id) }"
+        @click="openDetail($event, s)"
       >
         <label v-if="isAdmin" class="checkbox-wrap" @click.stop>
           <input type="checkbox" :value="s.id" v-model="selected" />
         </label>
-        <NuxtLink :to="`/songs/${s.id}`" class="song-info">
+        <div class="song-info">
           <div class="song-title">{{ s.title }}</div>
           <div class="song-meta">
             <span v-if="s.default_key" class="key-badge">{{ s.default_key }}</span>
@@ -305,68 +422,185 @@ onMounted(async () => {
             >{{ t.channel_name }} {{ t.count }}</span>
             <span v-if="!(s.refs_by_team || []).length" class="ref-count">레퍼런스 없음</span>
           </div>
-        </NuxtLink>
-        <div v-if="isAdmin" class="card-actions">
-          <button class="btn-sm" @click="openEdit($event, s)">편집</button>
+        </div>
+        <div v-if="isAdmin" class="card-actions" @click.stop>
           <button class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
         </div>
       </div>
       </template>
     </div>
 
-    <!-- 빠른 편집 모달 -->
+    <!-- 곡 상세 모달 -->
     <Teleport to="body">
-      <div v-if="editingSong" class="modal-overlay" @click.self="closeEdit">
-        <div class="modal-panel">
+      <div v-if="detailSong" class="modal-overlay" @click.self="closeDetail">
+        <div class="modal-panel detail-panel">
           <div class="modal-header">
-            <h3>곡 편집</h3>
-            <button class="btn-sm" @click="closeEdit">닫기</button>
+            <h3>{{ detailEditing ? '곡 편집' : (detailSong.title || '곡 상세') }}</h3>
+            <div class="header-actions">
+              <button v-if="isAdmin && !detailEditing" class="btn-sm" @click="startDetailEdit">편집</button>
+              <button v-if="isAdmin && !detailEditing" class="btn-sm danger" @click="deleteSong(null, detailSong.id, detailSong.title)">삭제</button>
+              <button class="btn-sm" @click="closeDetail">닫기</button>
+            </div>
           </div>
 
-          <label class="field-label">제목</label>
-          <input v-model="editForm.title" class="input" />
+          <div v-if="detailLoading" class="detail-loading">불러오는 중...</div>
 
-          <label class="field-label">키 (복수 선택)</label>
-          <div class="key-chips">
-            <button
-              v-for="k in COMMON_KEYS" :key="k"
-              type="button"
-              :class="['key-chip', { selected: editForm.keys.includes(k) }]"
-              @click="toggleEditKey(k)"
-            >{{ k }}</button>
-          </div>
+          <template v-else>
+            <!-- 편집 모드 -->
+            <div v-if="detailEditing" class="detail-edit">
+              <label class="field-label">제목</label>
+              <input v-model="detailForm.title" class="input" />
 
-          <label class="field-label">빠르기</label>
-          <div class="tempo-row">
-            <button
-              type="button"
-              :class="['tempo-btn', { active: editForm.tempo === 'FAST' }]"
-              @click="editForm.tempo = editForm.tempo === 'FAST' ? '' : 'FAST'"
-            >빠른곡</button>
-            <button
-              type="button"
-              :class="['tempo-btn slow', { active: editForm.tempo === 'SLOW' }]"
-              @click="editForm.tempo = editForm.tempo === 'SLOW' ? '' : 'SLOW'"
-            >느린곡</button>
-          </div>
+              <label class="field-label">키 (복수 선택)</label>
+              <div class="key-chips">
+                <button
+                  v-for="k in ALL_KEYS_GROUPS.common" :key="k"
+                  type="button"
+                  :class="['key-chip', { selected: detailForm.keys.includes(k) }]"
+                  @click="toggleDetailKey(k)"
+                >{{ k }}</button>
+              </div>
+              <button class="lyrics-toggle" @click="showAllKeys = !showAllKeys">
+                {{ showAllKeys ? '기타 키 접기' : '기타 키 더보기' }}
+              </button>
+              <div v-if="showAllKeys" class="key-chips">
+                <button
+                  v-for="k in [...ALL_KEYS_GROUPS.major, ...ALL_KEYS_GROUPS.minor]" :key="k"
+                  type="button"
+                  :class="['key-chip', { selected: detailForm.keys.includes(k) }]"
+                  @click="toggleDetailKey(k)"
+                >{{ k }}</button>
+              </div>
 
-          <button class="lyrics-toggle" @click="editShowLyrics = !editShowLyrics">
-            {{ editShowLyrics ? '가사 접기' : '가사 편집' }}
-          </button>
-          <textarea
-            v-if="editShowLyrics"
-            v-model="editForm.lyrics"
-            class="textarea"
-            rows="8"
-            placeholder="[Verse 1]&#10;가사..."
-          />
+              <label class="field-label">빠르기</label>
+              <div class="tempo-row">
+                <button
+                  type="button"
+                  :class="['tempo-btn', { active: detailForm.tempo === 'FAST' }]"
+                  @click="detailForm.tempo = detailForm.tempo === 'FAST' ? '' : 'FAST'"
+                >빠른곡</button>
+                <button
+                  type="button"
+                  :class="['tempo-btn slow', { active: detailForm.tempo === 'SLOW' }]"
+                  @click="detailForm.tempo = detailForm.tempo === 'SLOW' ? '' : 'SLOW'"
+                >느린곡</button>
+              </div>
 
-          <div class="modal-actions">
-            <button class="btn-accent" :disabled="editSaving" @click="saveEdit">
-              {{ editSaving ? '저장 중...' : '저장' }}
-            </button>
-            <NuxtLink :to="`/songs/${editingSong.id}`" class="btn">상세 페이지</NuxtLink>
-          </div>
+              <label class="field-label">가사 / 송폼</label>
+              <textarea v-model="detailForm.lyrics" class="textarea" rows="10" placeholder="[Verse 1]&#10;가사..." />
+
+              <div class="modal-actions">
+                <button class="btn-accent" :disabled="detailSaving" @click="saveDetailEdit">
+                  {{ detailSaving ? '저장 중...' : '저장' }}
+                </button>
+                <button class="btn-sm" @click="detailEditing = false">취소</button>
+              </div>
+            </div>
+
+            <!-- 보기 모드 -->
+            <template v-else>
+              <!-- 키 (인라인) -->
+              <div class="detail-section">
+                <div class="detail-section-title">키</div>
+                <div class="key-inline">
+                  <span v-for="k in (detailSong.keys || [])" :key="k" class="key-badge removable" @click="toggleKeyInline(k)">{{ k }} ×</span>
+                  <span v-if="detailSong.default_key && !(detailSong.keys || []).includes(detailSong.default_key)" class="key-badge dim">{{ detailSong.default_key }}</span>
+                </div>
+                <div class="key-chips" style="margin-top: 8px;">
+                  <button
+                    v-for="k in ALL_KEYS_GROUPS.common" :key="k"
+                    type="button"
+                    :class="['key-chip', { selected: (detailSong.keys || []).includes(k) }]"
+                    @click="toggleKeyInline(k)"
+                  >{{ k }}</button>
+                </div>
+                <button class="lyrics-toggle" @click="showAllKeys = !showAllKeys">
+                  {{ showAllKeys ? '기타 키 접기' : '기타 키 더보기' }}
+                </button>
+                <div v-if="showAllKeys" class="key-chips">
+                  <button
+                    v-for="k in [...ALL_KEYS_GROUPS.major, ...ALL_KEYS_GROUPS.minor]" :key="k"
+                    type="button"
+                    :class="['key-chip', { selected: (detailSong.keys || []).includes(k) }]"
+                    @click="toggleKeyInline(k)"
+                  >{{ k }}</button>
+                </div>
+              </div>
+
+              <!-- 빠르기 (인라인) -->
+              <div class="detail-section">
+                <div class="detail-section-title">빠르기</div>
+                <div class="tempo-row">
+                  <button
+                    type="button"
+                    :class="['tempo-btn', { active: detailSong.tempo === 'FAST' }]"
+                    @click="setTempoInline('FAST')"
+                  >빠른곡</button>
+                  <button
+                    type="button"
+                    :class="['tempo-btn slow', { active: detailSong.tempo === 'SLOW' }]"
+                    @click="setTempoInline('SLOW')"
+                  >느린곡</button>
+                </div>
+              </div>
+
+              <!-- 레퍼런스 -->
+              <div class="detail-section">
+                <div class="detail-section-title">
+                  레퍼런스 ({{ (detailSong.references || []).length }})
+                  <button class="btn-sm" @click="showAddRef = !showAddRef">+ 추가</button>
+                </div>
+
+                <div v-if="showAddRef" class="add-ref-form">
+                  <input v-model="newRef.youtube_url" class="input" placeholder="유튜브 URL" />
+                  <div class="ref-sub">
+                    <input v-model="newRef.title" class="input" placeholder="제목 (비우면 곡 제목)" />
+                    <input v-model="newRef.key" class="input input-sm" placeholder="키" />
+                  </div>
+                  <button class="btn-accent btn-sm" @click="addReference">추가</button>
+                </div>
+
+                <div v-if="!(detailSong.references || []).length" class="empty-sm">레퍼런스 없음</div>
+                <div v-for="ref in (detailSong.references || [])" :key="ref.id" class="ref-card">
+                  <a v-if="ref.youtube_video_id || ref.thumbnail_url" :href="ref.youtube_url" target="_blank" class="ref-thumb" @click.stop>
+                    <img
+                      :src="ref.thumbnail_url || `https://img.youtube.com/vi/${ref.youtube_video_id}/mqdefault.jpg`"
+                      :alt="ref.title"
+                    />
+                  </a>
+                  <div class="ref-body">
+                    <a :href="ref.youtube_url" target="_blank" class="ref-title" @click.stop>{{ ref.title }}</a>
+                    <div class="ref-meta">
+                      <span v-if="ref.key" class="key-badge sm">{{ ref.key }}</span>
+                      <span :class="['trust', ref.trust_level.toLowerCase()]">{{ ref.trust_level }}</span>
+                    </div>
+                    <div v-if="(detailSong.sheets || []).filter((s: any) => s.reference_id === ref.id).length > 0" class="ref-sheets">
+                      <div v-for="sh in (detailSong.sheets || []).filter((s: any) => s.reference_id === ref.id)" :key="sh.id" class="sheet-item">
+                        <a :href="sh.file_url" target="_blank">{{ sh.file_type }} 악보</a>
+                        <button class="btn-xs danger" @click="deleteSheet(sh.id)">x</button>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="btn-xs danger" @click="deleteReference(ref.id)">삭제</button>
+                </div>
+              </div>
+
+              <!-- 기본 악보 -->
+              <div v-if="(detailSong.sheets || []).filter((s: any) => !s.reference_id).length > 0" class="detail-section">
+                <div class="detail-section-title">기본 악보</div>
+                <div v-for="sh in (detailSong.sheets || []).filter((s: any) => !s.reference_id)" :key="sh.id" class="sheet-item">
+                  <a :href="sh.file_url" target="_blank">{{ sh.file_type }} 악보</a>
+                  <button class="btn-xs danger" @click="deleteSheet(sh.id)">x</button>
+                </div>
+              </div>
+
+              <!-- 가사 -->
+              <div v-if="detailSong.lyrics" class="detail-section">
+                <div class="detail-section-title">가사 / 송폼</div>
+                <pre class="lyrics">{{ detailSong.lyrics }}</pre>
+              </div>
+            </template>
+          </template>
         </div>
       </div>
     </Teleport>
@@ -600,6 +834,98 @@ onMounted(async () => {
   display: flex; gap: 8px; margin-top: 12px;
   .btn { @include btn; }
 }
+
+.detail-panel { max-width: 720px; }
+.header-actions { display: flex; gap: 6px; }
+.detail-loading { padding: 40px; text-align: center; color: var(--text-dim); }
+.detail-edit { display: flex; flex-direction: column; gap: 8px; }
+
+.detail-section {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  &:first-of-type { border-top: none; padding-top: 4px; }
+}
+.detail-section-title {
+  font-size: 13px; font-weight: 700; color: var(--text-dim);
+  margin-bottom: 8px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+.key-inline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.key-badge {
+  background: var(--accent-soft); color: var(--accent);
+  padding: 3px 10px; border-radius: 6px;
+  font-size: 13px; font-weight: 700;
+  &.sm { font-size: 11px; padding: 1px 6px; }
+  &.dim { opacity: 0.5; }
+  &.removable {
+    cursor: pointer;
+    &:hover { background: var(--red-soft); color: var(--red); }
+  }
+}
+
+.add-ref-form {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; margin-bottom: 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ref-sub { display: flex; gap: 6px; }
+.input-sm { max-width: 70px; }
+
+.ref-card {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  &:last-child { border-bottom: none; }
+}
+.ref-thumb {
+  flex-shrink: 0; width: 100px; aspect-ratio: 16/9;
+  border-radius: 6px; overflow: hidden;
+  img { width: 100%; height: 100%; object-fit: cover; }
+}
+.ref-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ref-title {
+  font-weight: 600; font-size: 13px; color: var(--green);
+  word-break: break-word; text-decoration: none;
+  &:hover { text-decoration: underline; }
+}
+.ref-meta { display: flex; gap: 6px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
+.trust {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  &.high { background: var(--green-soft); color: var(--green); }
+  &.medium { background: var(--accent-soft); color: var(--accent); }
+  &.low { background: var(--red-soft); color: var(--red); }
+}
+.ref-sheets { padding-left: 8px; border-left: 2px solid var(--line); margin-top: 4px; }
+
+.sheet-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0; font-size: 12px;
+  a { color: var(--accent); &:hover { text-decoration: underline; } }
+}
+
+.btn-xs {
+  padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line);
+  background: transparent; color: var(--text-dim); font-size: 10px; cursor: pointer;
+  &.danger { color: var(--red); &:hover { background: var(--red-soft); } }
+}
+.empty-sm { font-size: 12px; color: var(--text-dim); padding: 8px 0; }
+
+.lyrics {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: inherit;
+  margin: 0;
+}
+
+.song-card { cursor: pointer; }
 
 // 선택 액션 바
 .action-bar {

@@ -79,7 +79,7 @@ async function save() {
       })
     }
 
-    router.push(`/songs/${song.id}`)
+    router.push('/songs')
   } catch (e: any) {
     error.value = e.message || '등록 중 오류가 발생했습니다.'
   } finally {

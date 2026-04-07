@@ -690,7 +690,6 @@ onMounted(load)
               <span v-if="song.default_key" class="key-badge">{{ song.default_key }}</span>
             </div>
             <div class="us-actions">
-              <NuxtLink :to="`/songs/${song.id}`" class="btn-sm">상세</NuxtLink>
               <button class="btn-sm approve" @click="approveUserSong(song)">승인</button>
               <button class="btn-sm danger" @click="deleteUserSong(song)">삭제</button>
             </div>
