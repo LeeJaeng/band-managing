@@ -81,6 +81,30 @@ def test_parse_remove_anointing():
     assert "은혜" in result
 
 
+# ── 인도자 / 영문 부제 제거 ──
+
+def test_parse_remove_leader_paren():
+    assert parse_song_title("구원의 반석 (심종호 인도) Blessed be the rock") == "구원의 반석"
+
+
+def test_parse_remove_leader_dash():
+    result = parse_song_title("이 세상에 근심된 일이 많고 - 소진영 인도 | 마커스워십 | The haven rest")
+    assert result == "이 세상에 근심된 일이 많고"
+
+
+def test_parse_team_dash_song_leader_english():
+    assert parse_song_title("마커스워십 - 이와 같은 때엔 (소진영 인도) In moments like these") == "이와 같은 때엔"
+
+
+def test_parse_strip_english_subtitle_when_korean_present():
+    assert parse_song_title("주님의 은혜 넘치네 Your grace is enough") == "주님의 은혜 넘치네"
+
+
+def test_parse_keep_english_only_title():
+    # 한글이 없으면 영문 그대로 유지
+    assert parse_song_title("Holy Forever") == "Holy Forever"
+
+
 # ── 합쳐진 곡 필터 ──
 
 def test_skip_plus_songs():

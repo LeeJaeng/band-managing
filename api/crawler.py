@@ -143,11 +143,27 @@ def parse_song_title(video_title: str) -> str:
     # 사역팀 이름 제거
     for team in TEAM_NAMES:
         title = re.sub(re.escape(team), "", title, flags=re.IGNORECASE)
+    # 인도자 표기 제거: (소진영 인도) / (심종호 인도) / [김선락 인도] 등
+    title = re.sub(r"\s*[\(\[（][^)\]）]*인도[^)\]）]*[\)\]）]\s*", " ", title)
+    # 대시로 이어진 인도자 표기 제거: " - 소진영 인도" / "- 인도: 김선락"
+    title = re.sub(r"\s*[-–—]\s*[^-–—|()\[\]]*?인도\b[^-–—|()\[\]]*", " ", title)
+    # 끝에 매달린 대시/구분자 정리 (다음 단계의 영어 부제 제거가 잘 동작하도록)
+    title = re.sub(r"\s*[-–—|·]+\s*$", "", title)
+    # 한글 제목 + 영어 부제 → 한글만 유지
+    # 예: "구원의 반석 Blessed be the rock" → "구원의 반석"
+    #     "거룩 영원히 (Holy Forever)"     → "거룩 영원히"
+    if re.search(r"[가-힣]", title):
+        title = re.sub(
+            r"\s*\(?\s*[A-Za-z][A-Za-z\s'’&]*\)?\s*$",
+            "",
+            title,
+        ).strip()
     # " - " 뒤에 남은 텍스트 제거 (보통 팀 이름이 뒤에 붙음)
     title = re.sub(r"\s*-\s*$", "", title)
     # 따옴표, 특수 유니코드 문자 제거
     title = re.sub(r'["\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f\uff02]', '', title)
-    # 괄호 안 영어 제목이 남아있으면 제거 (선택)
+    # 다중 공백 정리
+    title = re.sub(r"\s+", " ", title)
     # 앞뒤 공백/특수문자 정리
     title = title.strip(" -–—·|,.'\"")
     return title if title else video_title.strip()
