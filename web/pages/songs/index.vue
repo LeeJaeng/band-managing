@@ -257,7 +257,9 @@ onMounted(async () => {
   display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
 }
 .filter-select {
-  @include input; padding: 7px 10px; height: auto; font-size: 13px;
+  @include input;
+  width: auto; height: auto;
+  padding: 7px 10px; font-size: 13px;
   appearance: auto; flex: 0 0 auto;
 }
 .filter-reset {
