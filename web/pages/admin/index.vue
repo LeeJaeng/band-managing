@@ -174,6 +174,47 @@ async function mergeDupGroup(group: any) {
   dupMerging.value = null
 }
 
+// 곡 DB 재정리 (parser/filter 일괄 적용)
+const showRecleanModal = ref(false)
+const recleanLoading = ref(false)
+const recleanApplying = ref(false)
+const recleanPreview = ref<any>(null)
+
+async function openRecleanModal() {
+  showRecleanModal.value = true
+  recleanLoading.value = true
+  recleanPreview.value = null
+  try {
+    recleanPreview.value = await api<any>(`/api/admin/songs/reclean?dry_run=true&_t=${Date.now()}`, { method: 'POST' })
+  } catch (e: any) {
+    alert(e.message || '재정리 미리보기 실패')
+    showRecleanModal.value = false
+  }
+  recleanLoading.value = false
+}
+
+function closeRecleanModal() {
+  showRecleanModal.value = false
+  recleanPreview.value = null
+}
+
+async function applyReclean() {
+  if (!recleanPreview.value) return
+  const t = recleanPreview.value.title_changes_total
+  const r = recleanPreview.value.refs_to_delete_total
+  if (!confirm(`제목 변경 ${t}건 + 레퍼런스 삭제 ${r}건을 실제 적용합니다.\n(이후 고아 CRAWLED 곡은 자동 삭제)\n계속하시겠습니까?`)) return
+  recleanApplying.value = true
+  try {
+    const res = await api<any>(`/api/admin/songs/reclean?dry_run=false`, { method: 'POST' })
+    alert(`적용 완료!\n제목 변경: ${res.title_changes}\n레퍼런스 삭제: ${res.refs_deleted}\n고아 곡 삭제: ${res.orphans_deleted}`)
+    closeRecleanModal()
+    await load()
+  } catch (e: any) {
+    alert(e.message || '재정리 실패')
+  }
+  recleanApplying.value = false
+}
+
 // 채널 등록/편집
 const showChannelForm = ref(false)
 const editingChannelId = ref<string | null>(null)
@@ -609,6 +650,7 @@ onMounted(load)
             <button class="btn" :disabled="crawling" @click="crawlSetlistsAll">
               {{ crawling ? '...' : '전체 세트리스트' }}
             </button>
+            <button class="btn" @click="openRecleanModal">곡 DB 재정리</button>
             <button class="btn" @click="openDupModal">중복 곡 정리</button>
             <button class="btn-sm danger" @click="resetCrawlData">초기화</button>
           </div>
@@ -821,6 +863,58 @@ onMounted(load)
       </section>
 
     </template>
+
+    <!-- 곡 DB 재정리 모달 -->
+    <Teleport to="body">
+      <div v-if="showRecleanModal" class="modal-overlay" @click.self="closeRecleanModal">
+        <div class="modal-panel">
+          <div class="modal-header">
+            <h3>곡 DB 재정리 (미리보기)</h3>
+            <button class="btn-sm" @click="closeRecleanModal">닫기</button>
+          </div>
+          <div v-if="recleanLoading" class="dup-empty">스캔 중...</div>
+          <div v-else-if="recleanPreview" class="dup-group-list">
+            <div class="reclean-summary">
+              <div>제목 변경 후보: <strong>{{ recleanPreview.title_changes_total }}</strong>건</div>
+              <div>레퍼런스 삭제 후보: <strong>{{ recleanPreview.refs_to_delete_total }}</strong>건 (Shorts/inst/MR 등)</div>
+              <div class="dup-empty" style="padding: 8px 0; font-size: 12px;">
+                * 적용 후 ref 0개가 되는 CRAWLED 곡은 자동 삭제됩니다.
+              </div>
+            </div>
+
+            <div v-if="recleanPreview.title_changes?.length" class="dup-group">
+              <div class="dup-group-title">제목 변경 (앞 100건)</div>
+              <div class="reclean-list">
+                <div v-for="c in recleanPreview.title_changes" :key="c.id" class="reclean-row">
+                  <span class="reclean-old">{{ c.old }}</span>
+                  <span class="reclean-arrow">→</span>
+                  <span class="reclean-new">{{ c.new }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="recleanPreview.refs_to_delete?.length" class="dup-group">
+              <div class="dup-group-title">레퍼런스 삭제 (앞 100건)</div>
+              <div class="reclean-list">
+                <div v-for="r in recleanPreview.refs_to_delete" :key="r.id" class="reclean-row">
+                  <span class="reclean-old">{{ r.title }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="dup-group-actions" style="margin-top: 12px;">
+              <button
+                class="btn-accent"
+                :disabled="recleanApplying || (recleanPreview.title_changes_total === 0 && recleanPreview.refs_to_delete_total === 0)"
+                @click="applyReclean"
+              >
+                {{ recleanApplying ? '적용 중...' : '실제 적용' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 중복 곡 정리 모달 -->
     <Teleport to="body">
@@ -1245,6 +1339,26 @@ label {
   label { font-size: 12px; color: var(--text-dim); margin: 0; }
 }
 .dup-group-actions { display: flex; justify-content: flex-end; }
+
+.reclean-summary {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px; margin-bottom: 12px;
+  background: var(--bg-soft); border-radius: 8px;
+  font-size: 13px;
+}
+.reclean-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 300px; overflow-y: auto;
+  font-size: 12px;
+}
+.reclean-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 4px;
+  &:hover { background: var(--bg-soft); }
+}
+.reclean-old { color: var(--text-dim); text-decoration: line-through; }
+.reclean-arrow { color: var(--text-dim); }
+.reclean-new { color: var(--accent); font-weight: 600; }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
