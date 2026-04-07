@@ -124,6 +124,11 @@ const detailSaving = ref(false)
 const showAllKeys = ref(false)
 const showAddRef = ref(false)
 const newRef = ref({ youtube_url: '', title: '', key: '' })
+const playingRefId = ref<string | null>(null)
+
+function playRef(refId: string) {
+  playingRefId.value = playingRefId.value === refId ? null : refId
+}
 
 async function openDetail(e: Event, s: any) {
   e?.preventDefault?.()
@@ -133,6 +138,7 @@ async function openDetail(e: Event, s: any) {
   detailEditing.value = false
   showAddRef.value = false
   showAllKeys.value = false
+  playingRefId.value = null
   detailLoading.value = true
   try {
     detailSong.value = await api<any>(`/api/songs/${s.id}?_t=${Date.now()}`)
@@ -148,6 +154,7 @@ function closeDetail() {
   detailListIdx.value = -1
   detailEditing.value = false
   showAddRef.value = false
+  playingRefId.value = null
 }
 
 function syncListItem(patch: Record<string, any>) {
@@ -562,12 +569,24 @@ onMounted(async () => {
 
                 <div v-if="!(detailSong.references || []).length" class="empty-sm">레퍼런스 없음</div>
                 <div v-for="ref in (detailSong.references || [])" :key="ref.id" class="ref-card">
-                  <a v-if="ref.youtube_video_id || ref.thumbnail_url" :href="ref.youtube_url" target="_blank" class="ref-thumb" @click.stop>
-                    <img
-                      :src="ref.thumbnail_url || `https://img.youtube.com/vi/${ref.youtube_video_id}/mqdefault.jpg`"
-                      :alt="ref.title"
+                  <div v-if="ref.youtube_video_id || ref.thumbnail_url" class="ref-media">
+                    <iframe
+                      v-if="playingRefId === ref.id && ref.youtube_video_id"
+                      class="ref-iframe"
+                      :src="`https://www.youtube.com/embed/${ref.youtube_video_id}?autoplay=1`"
+                      title="YouTube"
+                      frameborder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowfullscreen
                     />
-                  </a>
+                    <button v-else type="button" class="ref-thumb" @click.stop="playRef(ref.id)">
+                      <img
+                        :src="ref.thumbnail_url || `https://img.youtube.com/vi/${ref.youtube_video_id}/mqdefault.jpg`"
+                        :alt="ref.title"
+                      />
+                      <span class="play-icon">▶</span>
+                    </button>
+                  </div>
                   <div class="ref-body">
                     <a :href="ref.youtube_url" target="_blank" class="ref-title" @click.stop>{{ ref.title }}</a>
                     <div class="ref-meta">
@@ -835,7 +854,7 @@ onMounted(async () => {
   .btn { @include btn; }
 }
 
-.detail-panel { max-width: 720px; }
+.detail-panel { max-width: 960px; max-height: 92vh; }
 .header-actions { display: flex; gap: 6px; }
 .detail-loading { padding: 40px; text-align: center; color: var(--text-dim); }
 .detail-edit { display: flex; flex-direction: column; gap: 8px; }
@@ -880,10 +899,33 @@ onMounted(async () => {
   border-bottom: 1px solid var(--line);
   &:last-child { border-bottom: none; }
 }
+.ref-media {
+  flex-shrink: 0;
+  width: 280px;
+  aspect-ratio: 16/9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
 .ref-thumb {
-  flex-shrink: 0; width: 100px; aspect-ratio: 16/9;
-  border-radius: 6px; overflow: hidden;
-  img { width: 100%; height: 100%; object-fit: cover; }
+  position: relative;
+  width: 100%; height: 100%;
+  border: none; padding: 0; cursor: pointer;
+  display: block; background: #000;
+  img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .play-icon {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.35); color: #fff; font-size: 36px;
+    transition: background .15s;
+  }
+  &:hover .play-icon { background: rgba(0,0,0,0.55); }
+}
+.ref-iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+@media (max-width: 720px) {
+  .ref-media { width: 100%; }
+  .ref-card { flex-direction: column; }
 }
 .ref-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ref-title {
