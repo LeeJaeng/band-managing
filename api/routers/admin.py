@@ -643,7 +643,8 @@ def _normalize_title_for_dedup(title: str) -> str:
     t = _re.sub(r"\([^)]*\)", " ", t)
     t = _re.sub(r"\[[^\]]*\]", " ", t)
     t = _re.sub(r"[!?~。,.'\"·—–\-:/|]", " ", t)
-    t = _re.sub(r"\s+", " ", t).strip().lower()
+    # 띄어쓰기 차이 무시 — 모든 공백 제거
+    t = _re.sub(r"\s+", "", t).lower()
     return t
 
 
