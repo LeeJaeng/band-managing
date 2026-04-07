@@ -283,6 +283,36 @@ async function crawlAll() {
   await load()
 }
 
+async function crawlSetlistsChannel(channelId: string) {
+  crawling.value = true
+  try {
+    const result = await api<any>(`/api/admin/crawl-setlists/${channelId}?max_videos=10`, { method: 'POST' })
+    if (result.error) {
+      alert(`세트리스트 크롤 실패: ${result.error}`)
+    } else {
+      alert(`세트리스트 크롤 완료!\n영상 ${result.videos_scanned}개 스캔\n신규 곡 +${result.songs_created}개\n키 보강 +${result.keys_added}개\n레퍼런스 +${result.refs_added}개`)
+    }
+  } catch (e: any) { alert(e.message || '세트리스트 크롤 실패') }
+  crawling.value = false
+  await load()
+}
+
+async function crawlSetlistsAll() {
+  if (!confirm('전체 활성 채널에서 예배 실황 영상의 세트리스트를 추출합니다.\n(YouTube API quota를 꽤 사용합니다)')) return
+  crawling.value = true
+  try {
+    const result = await api<any>('/api/admin/crawl-setlists/all?max_videos=10', { method: 'POST' })
+    const summary = (result.results || []).map((r: any) =>
+      r.error
+        ? `${r.channel_name}: 실패 - ${r.error}`
+        : `${r.channel_name}: 영상 ${r.videos_scanned ?? 0}개, 신규 곡 +${r.songs_created ?? 0}, 키 +${r.keys_added ?? 0}, ref +${r.refs_added ?? 0}`
+    ).join('\n')
+    alert(`전체 세트리스트 크롤 완료! (${result.channels_crawled}개 채널)\n\n${summary}`)
+  } catch (e: any) { alert(e.message || '세트리스트 크롤 실패') }
+  crawling.value = false
+  await load()
+}
+
 function removeRq(id: string) {
   const idx = reviewQueue.value.findIndex(r => r.id === id)
   if (idx >= 0) {
@@ -495,6 +525,9 @@ onMounted(load)
             <button class="btn-accent" :disabled="crawling" @click="crawlAll">
               {{ crawling ? '크롤링 중...' : '전체 크롤링' }}
             </button>
+            <button class="btn" :disabled="crawling" @click="crawlSetlistsAll">
+              {{ crawling ? '...' : '전체 세트리스트' }}
+            </button>
             <button class="btn-sm danger" @click="resetCrawlData">초기화</button>
           </div>
         </div>
@@ -547,6 +580,7 @@ onMounted(load)
             </div>
             <div class="ch-actions">
               <button class="btn-sm" @click="crawlChannel(ch.id)" :disabled="crawling">크롤링</button>
+              <button class="btn-sm" @click="crawlSetlistsChannel(ch.id)" :disabled="crawling">세트리스트</button>
               <button class="btn-sm" @click="openEditForm(ch)">수정</button>
               <button class="btn-sm" @click="toggleChannel(ch)">
                 {{ ch.is_active ? '비활성화' : '활성화' }}
