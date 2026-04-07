@@ -38,8 +38,9 @@ GET    /api/channels                    채널(팀) 목록 (곡 필터용, 인�
 
 ### 곡 (/api/songs)
 ```
-GET    /api/songs?q=&limit=&offset=&key_filter=&tempo=&channel_id=
-                                        곡 목록 (검색, 키/빠르기/채널 필터, ref_count 포함)
+GET    /api/songs?q=&limit=&offset=&key_filter=&no_key=&tempo=&no_tempo=&channel_id=&source=
+                                        곡 목록 (검색, 키/빠르기/채널/소스 필터,
+                                        refs_by_team[] = [{channel_id,channel_name,count}] 포함)
 GET    /api/songs/:id                   곡 상세 (refs, sheets, keys 포함)
 POST   /api/songs                       곡 등록
 PUT    /api/songs/:id                   곡 수정 (title, keys[], lyrics, tempo)
@@ -82,19 +83,23 @@ POST   /api/admin/channels              채널 등록
 PUT    /api/admin/channels/:id          채널 수정
 DELETE /api/admin/channels/:id          채널 삭제 (FK 정리)
 GET    /api/admin/channels/resolve-id   @handle → UC... 변환
-POST   /api/admin/crawl/:channel_id     개별 크롤링
+POST   /api/admin/crawl/:channel_id     개별 크롤링 (단곡 영상)
 POST   /api/admin/crawl/all             전체 크롤링
+POST   /api/admin/crawl-setlists/:channel_id  세트리스트 크롤링 (예배 실황 description 파싱)
+POST   /api/admin/crawl-setlists/all    전체 채널 세트리스트 크롤링
 GET    /api/admin/crawl/logs            크롤링 로그
 DELETE /api/admin/crawl/reset           크롤링 + 곡 데이터 전체 삭제 (TRUNCATE)
 
 GET    /api/admin/review-queue          검증 큐 (유사곡 후보 포함, 페이지네이션 10개)
 GET    /api/admin/review-queue/export   검증 큐 전체 내보내기 (JSON)
-POST   /api/admin/review/auto-approve   자동 승인 (유사도 높은 항목 일괄)
+POST   /api/admin/review/reparse-titles PENDING 항목의 parsed_song_title을 현재 parser로 재계산
+POST   /api/admin/review/auto-approve   자동 승인 (블랙리스트/문장형 휴리스틱 통과 항목)
 POST   /api/admin/review/batch          일괄 처리 (approve/reject ids 배열)
 POST   /api/admin/review/:id/approve    개별 승인 (기존곡 매칭 or 새곡)
 POST   /api/admin/review/:id/reject     개별 거부
 
-POST   /api/admin/songs/merge           곡 병합 (target_id + source_ids[] 배열)
+GET    /api/admin/songs/duplicate-candidates  중복 곡 후보 그룹 (정확/접두 정규화 일치)
+POST   /api/admin/songs/merge           곡 병합 (source_ids[] + target_id, target_title 옵션)
 POST   /api/admin/songs/bulk-update     선택 곡 일괄 수정 (키 추가, tempo 설정)
 
 GET    /api/admin/filter-keywords       크롤링 필터 키워드 목록
