@@ -60,7 +60,9 @@ def list_songs(
     q: str = Query(default="", description="검색어 (제목/가사)"),
     source: str = Query(default="", description="소스 필터 (CRAWLED/MANUAL/USER)"),
     key_filter: str = Query(default="", description="키 필터"),
+    no_key: bool = Query(default=False, description="키 없는 곡만"),
     tempo: str = Query(default="", description="빠르기 필터 (FAST/SLOW)"),
+    no_tempo: bool = Query(default=False, description="빠르기 없는 곡만"),
     channel_id: str = Query(default="", description="채널(팀) 필터"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
@@ -93,8 +95,18 @@ def list_songs(
                 Song.keys.cast(Str).contains(f"'{key_filter}'"),
             )
         )
+    if no_key:
+        from sqlalchemy import cast, String as Str
+        query = query.filter(
+            and_(
+                Song.default_key.is_(None),
+                or_(Song.keys.is_(None), Song.keys.cast(Str).in_(["null", "[]", ""])),
+            )
+        )
     if tempo:
         query = query.filter(Song.tempo == tempo)
+    if no_tempo:
+        query = query.filter(Song.tempo.is_(None))
     if channel_id:
         query = query.filter(
             Song.id.in_(

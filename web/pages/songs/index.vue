@@ -15,6 +15,25 @@ const channels = ref<any[]>([])
 
 const COMMON_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B', 'C#', 'Eb', 'F#', 'Ab']
 
+// 같은 이름 모아보기
+const groupDuplicates = ref(false)
+
+const displaySongs = computed(() => {
+  if (!groupDuplicates.value) return songs.value
+  // 제목 기준 그룹화, 2개 이상인 것만 모아 반환 (같은 제목끼리 붙어서)
+  const groups = new Map<string, any[]>()
+  for (const s of songs.value) {
+    const key = s.title.trim().toLowerCase()
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(s)
+  }
+  const result: any[] = []
+  for (const group of groups.values()) {
+    if (group.length >= 2) result.push(...group)
+  }
+  return result
+})
+
 // 선택
 const selected = ref<string[]>([])
 
@@ -97,8 +116,10 @@ async function deleteSong(e: Event, songId: string, title: string) {
 async function search() {
   loading.value = true
   const params = new URLSearchParams({ q: query.value, limit: '100' })
-  if (filterKey.value) params.set('key_filter', filterKey.value)
-  if (filterTempo.value) params.set('tempo', filterTempo.value)
+  if (filterKey.value === 'NO_KEY') params.set('no_key', 'true')
+  else if (filterKey.value) params.set('key_filter', filterKey.value)
+  if (filterTempo.value === 'NO_TEMPO') params.set('no_tempo', 'true')
+  else if (filterTempo.value) params.set('tempo', filterTempo.value)
   if (filterChannel.value) params.set('channel_id', filterChannel.value)
   const data = await api<any>(`/api/songs?${params}`)
   songs.value = data.items
@@ -108,7 +129,7 @@ async function search() {
 }
 
 function resetFilters() {
-  filterKey.value = ''; filterTempo.value = ''; filterChannel.value = ''; query.value = ''
+  filterKey.value = ''; filterTempo.value = ''; filterChannel.value = ''; query.value = ''; groupDuplicates.value = false
   search()
 }
 
@@ -137,10 +158,12 @@ onMounted(async () => {
     <div class="filter-bar">
       <select v-model="filterKey" class="filter-select" @change="search">
         <option value="">키 전체</option>
+        <option value="NO_KEY">— 키 없음</option>
         <option v-for="k in COMMON_KEYS" :key="k" :value="k">{{ k }}</option>
       </select>
       <select v-model="filterTempo" class="filter-select" @change="search">
         <option value="">빠르기 전체</option>
+        <option value="NO_TEMPO">— 빠르기 없음</option>
         <option value="FAST">빠른곡</option>
         <option value="SLOW">느린곡</option>
       </select>
@@ -148,17 +171,30 @@ onMounted(async () => {
         <option value="">팀 전체</option>
         <option v-for="c in channels" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
-      <button v-if="filterKey || filterTempo || filterChannel" class="filter-reset" @click="resetFilters">필터 초기화</button>
+      <label class="dup-check">
+        <input type="checkbox" v-model="groupDuplicates" />
+        <span>같은 이름 모아보기</span>
+      </label>
+      <button v-if="filterKey || filterTempo || filterChannel || groupDuplicates" class="filter-reset" @click="resetFilters">필터 초기화</button>
     </div>
 
-    <p class="total">총 {{ total }}곡<span v-if="selected.length" class="selected-count"> · {{ selected.length }}개 선택</span></p>
+    <p class="total">
+      총 {{ total }}곡
+      <span v-if="groupDuplicates"> · 중복 {{ displaySongs.length }}곡</span>
+      <span v-if="selected.length" class="selected-count"> · {{ selected.length }}개 선택</span>
+    </p>
 
     <div v-if="loading" class="loading">불러오는 중...</div>
     <div v-else-if="songs.length === 0" class="empty">등록된 곡이 없습니다.</div>
 
     <div v-else class="song-list">
+      <template v-for="(s, idx) in displaySongs" :key="s.id">
+        <!-- 같은 이름 모아보기: 그룹 첫 항목에 구분선 -->
+        <div
+          v-if="groupDuplicates && (idx === 0 || displaySongs[idx-1].title.trim().toLowerCase() !== s.title.trim().toLowerCase())"
+          class="dup-group-label"
+        >{{ s.title }}</div>
       <div
-        v-for="s in songs" :key="s.id"
         class="song-card"
         :class="{ selected: isSelected(s.id) }"
       >
@@ -176,6 +212,7 @@ onMounted(async () => {
         </NuxtLink>
         <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
       </div>
+      </template>
     </div>
 
     <!-- 선택 액션 바 -->
@@ -291,6 +328,20 @@ onMounted(async () => {
 .loading, .empty { text-align: center; padding: 40px; color: var(--text-dim); }
 
 .song-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 120px; }
+
+.dup-group-label {
+  font-size: 12px; font-weight: 700; color: var(--accent);
+  padding: 12px 4px 4px; border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+  &:first-child { padding-top: 0; }
+}
+
+.dup-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-dim); cursor: pointer;
+  input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+  &:hover { color: var(--text); }
+}
 
 .song-card {
   @include card; padding: 14px 16px;

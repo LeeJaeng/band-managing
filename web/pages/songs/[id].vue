@@ -9,7 +9,7 @@ const loading = ref(true)
 const editing = ref(false)
 
 // 편집 폼
-const editForm = ref({ title: '', keys: [] as string[], lyrics: '' })
+const editForm = ref({ title: '', keys: [] as string[], lyrics: '', tempo: '' })
 
 // 키 목록 (자주 쓰는 키 우선)
 const COMMON_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B']
@@ -20,6 +20,18 @@ const ALL_KEYS = [...COMMON_KEYS, ...OTHER_MAJOR_KEYS, ...MINOR_KEYS]
 // 인라인 키 편집
 const showKeyPicker = ref(false)
 const showAllKeys = ref(false)
+
+// 인라인 tempo 저장
+async function setTempoInline(tempo: string) {
+  const next = song.value.tempo === tempo ? null : tempo
+  try {
+    await api(`/api/songs/${route.params.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: song.value.title, keys: song.value.keys || [], tempo: next }),
+    })
+    await load()
+  } catch (e: any) { alert(e.message || '빠르기 저장 실패') }
+}
 
 // 레퍼런스 추가
 const showAddRef = ref(false)
@@ -36,6 +48,7 @@ function startEdit() {
     title: song.value.title,
     keys: [...(song.value.keys || [])],
     lyrics: song.value.lyrics || '',
+    tempo: song.value.tempo || '',
   }
   editing.value = true
 }
@@ -178,6 +191,20 @@ onMounted(load)
           </div>
         </div>
 
+        <label>빠르기</label>
+        <div class="tempo-inline">
+          <button
+            type="button"
+            :class="['tempo-btn', { active: editForm.tempo === 'FAST' }]"
+            @click="editForm.tempo = editForm.tempo === 'FAST' ? '' : 'FAST'"
+          >빠른곡</button>
+          <button
+            type="button"
+            :class="['tempo-btn slow', { active: editForm.tempo === 'SLOW' }]"
+            @click="editForm.tempo = editForm.tempo === 'SLOW' ? '' : 'SLOW'"
+          >느린곡</button>
+        </div>
+
         <label>가사 (송폼)</label>
         <textarea v-model="editForm.lyrics" class="textarea" rows="10" placeholder="[Verse 1]&#10;가사를 입력하세요...&#10;&#10;[Chorus]&#10;후렴 가사..." />
 
@@ -231,6 +258,24 @@ onMounted(load)
           <button class="key-more-btn" @click="showAllKeys = !showAllKeys">
             {{ showAllKeys ? '접기' : '더보기 (기타 키)' }}
           </button>
+        </div>
+      </section>
+
+      <!-- 빠르기 (인라인 편집) -->
+      <section v-if="!editing" class="section">
+        <h2>빠르기</h2>
+        <div class="tempo-inline">
+          <button
+            type="button"
+            :class="['tempo-btn', { active: song.tempo === 'FAST' }]"
+            @click="setTempoInline('FAST')"
+          >빠른곡</button>
+          <button
+            type="button"
+            :class="['tempo-btn slow', { active: song.tempo === 'SLOW' }]"
+            @click="setTempoInline('SLOW')"
+          >느린곡</button>
+          <span v-if="!song.tempo" class="tempo-unset">미설정 (클릭하여 설정)</span>
         </div>
       </section>
 
@@ -452,6 +497,37 @@ onMounted(load)
   padding: 2px 0;
   text-align: left;
   &:hover { color: var(--accent); }
+}
+
+.tempo-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tempo-btn {
+  padding: 5px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  &:hover { border-color: #ff6450; color: #ff6450; }
+  &.active { background: rgba(255,100,80,0.15); border-color: #ff6450; color: #ff6450; }
+  &.slow {
+    &:hover { border-color: #5096ff; color: #5096ff; }
+    &.active { background: rgba(80,150,255,0.15); border-color: #5096ff; color: #5096ff; }
+  }
+}
+
+.tempo-unset {
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.6;
 }
 
 .add-form {
