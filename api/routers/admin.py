@@ -29,8 +29,10 @@ class ChannelUpdate(BaseModel):
 
 
 class ReviewApprove(BaseModel):
-    song_id: str | None = None  # 기존 곡에 매칭, None이면 새 곡 생성
-    song_title: str | None = None  # 새 곡 생성 시 제목
+    song_id: str | None = None      # 기존 곡에 매칭, None이면 새 곡 생성
+    song_title: str | None = None   # 새 곡 생성 시 제목
+    keys: list[str] | None = None   # 새 곡 생성 시 키 목록
+    tempo: str | None = None        # 새 곡 생성 시 빠르기 (FAST/SLOW)
 
 
 # ── Channels ───────────────────────────────────────────
@@ -417,7 +419,11 @@ def approve_review(review_id: str, body: ReviewApprove, _: User = Depends(requir
             raise HTTPException(404, "Song not found")
     else:
         title = body.song_title or rq.parsed_song_title or rq.video_title
-        song = Song(title=title)
+        song = Song(
+            title=title,
+            keys=body.keys or None,
+            tempo=body.tempo or None,
+        )
         db.add(song)
         db.flush()
 

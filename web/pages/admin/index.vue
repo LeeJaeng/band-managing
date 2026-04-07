@@ -14,6 +14,22 @@ const newKeyword = ref('')
 const loading = ref(true)
 const crawling = ref(false)
 
+const COMMON_KEYS = ['C', 'D', 'E', 'F', 'G', 'A', 'Bb', 'B']
+// 검증 큐 row별 로컬 상태 (키/빠르기)
+const rqKeys = ref<Record<string, string[]>>({})
+const rqTempo = ref<Record<string, string>>({})
+
+function toggleRqKey(rqId: string, key: string) {
+  if (!rqKeys.value[rqId]) rqKeys.value[rqId] = []
+  const arr = rqKeys.value[rqId]
+  const idx = arr.indexOf(key)
+  if (idx >= 0) arr.splice(idx, 1)
+  else arr.push(key)
+}
+function setRqTempo(rqId: string, tempo: string) {
+  rqTempo.value[rqId] = rqTempo.value[rqId] === tempo ? '' : tempo
+}
+
 // 제목 입력 자동 검색 (검증 큐)
 const titleSearchCache = ref<Record<string, any[]>>({})
 const titleSearchTimers = {} as Record<string, ReturnType<typeof setTimeout>>
@@ -280,9 +296,11 @@ async function approveAsNew(rq: any) {
   const title = (rq.parsed_song_title || '').trim()
   if (!title) { alert('곡 제목을 입력해주세요.'); return }
   try {
+    const keys = rqKeys.value[rq.id]?.length ? rqKeys.value[rq.id] : undefined
+    const tempo = rqTempo.value[rq.id] || undefined
     await api(`/api/admin/review/${rq.id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ song_title: title }),
+      body: JSON.stringify({ song_title: title, keys, tempo }),
     })
     removeRq(rq.id)
   } catch (e: any) { alert(e.message || '승인 실패') }
@@ -581,6 +599,35 @@ onMounted(load)
               </div>
             </div>
 
+            <!-- 키 선택 (새 곡 등록 시 적용) -->
+            <div class="rv-field-row">
+              <label>키</label>
+              <div class="rv-key-chips">
+                <button
+                  v-for="k in COMMON_KEYS" :key="k" type="button"
+                  :class="['key-chip-sm', { selected: (rqKeys[rq.id] || []).includes(k) }]"
+                  @click="toggleRqKey(rq.id, k)"
+                >{{ k }}</button>
+              </div>
+            </div>
+
+            <!-- 빠르기 선택 (새 곡 등록 시 적용) -->
+            <div class="rv-field-row">
+              <label>빠르기</label>
+              <div class="rv-tempo-chips">
+                <button
+                  type="button"
+                  :class="['tempo-chip', { selected: rqTempo[rq.id] === 'FAST' }]"
+                  @click="setRqTempo(rq.id, 'FAST')"
+                >빠른곡</button>
+                <button
+                  type="button"
+                  :class="['tempo-chip', { selected: rqTempo[rq.id] === 'SLOW' }]"
+                  @click="setRqTempo(rq.id, 'SLOW')"
+                >느린곡</button>
+              </div>
+            </div>
+
             <a :href="rq.youtube_url" target="_blank" class="rv-link">유튜브에서 보기 ↗</a>
 
             <!-- 유사곡 후보 (서버 제공) -->
@@ -782,6 +829,38 @@ label {
 }
 
 .rv-link { font-size: 12px; color: var(--accent); align-self: flex-start; &:hover { text-decoration: underline; } }
+
+.rv-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  label { font-size: 11px; color: var(--text-dim); width: 36px; flex-shrink: 0; }
+}
+.rv-key-chips, .rv-tempo-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.key-chip-sm {
+  padding: 2px 7px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  &:hover { border-color: var(--accent); color: var(--accent); }
+  &.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+}
+.tempo-chip {
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  &:hover { border-color: var(--accent); color: var(--accent); }
+  &.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+}
+
 .rv-actions { display: flex; gap: 6px; flex-shrink: 0; flex-direction: column; }
 
 .rv-search {
