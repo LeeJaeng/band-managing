@@ -781,6 +781,32 @@ def duplicate_candidates(_: User = Depends(require_admin), db: Session = Depends
     return {"groups": result, "total_groups": len(result)}
 
 
+@router.post("/songs/delete-setlist-refs")
+def delete_setlist_refs(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """예배 실황 세트리스트 크롤로 생성된 타임스탬프 레퍼런스 일괄 삭제.
+
+    합성 youtube_video_id 형식 'VIDEOID@초'를 식별자로 사용.
+    """
+    refs = (
+        db.query(SongReference)
+        .filter(SongReference.youtube_video_id.like("%@%"))
+        .all()
+    )
+    ref_ids = [r.id for r in refs]
+    if not ref_ids:
+        return {"deleted": 0}
+    db.query(SongSheet).filter(SongSheet.reference_id.in_(ref_ids)).update(
+        {"reference_id": None}, synchronize_session=False
+    )
+    deleted = (
+        db.query(SongReference)
+        .filter(SongReference.id.in_(ref_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted}
+
+
 @router.post("/songs/reclean")
 def reclean_songs(
     dry_run: bool = True,

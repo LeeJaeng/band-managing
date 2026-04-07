@@ -548,6 +548,15 @@ async function rejectReview(rq: any) {
   } catch (e: any) { alert(e.message || '거부 실패') }
 }
 
+async function deleteSetlistRefs() {
+  if (!confirm('예배 실황 세트리스트로 생성된 타임스탬프 레퍼런스를 모두 삭제할까요?\n(이후 세트리스트 크롤은 곡/키만 추가하고 ref는 만들지 않습니다)')) return
+  try {
+    const res = await api<any>(`/api/admin/songs/delete-setlist-refs`, { method: 'POST' })
+    alert(`삭제 완료: ${res.deleted}건`)
+    await load()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
 async function reparseTitles() {
   if (!confirm('PENDING 큐 항목의 제목을 현재 파서로 재계산하시겠습니까?')) return
   try {
@@ -672,6 +681,7 @@ onMounted(load)
               {{ crawling ? '...' : '전체 세트리스트' }}
             </button>
             <button class="btn" @click="openRecleanModal">곡 DB 재정리</button>
+            <button class="btn" @click="deleteSetlistRefs">세트리스트 ref 삭제</button>
             <button class="btn" @click="openDupModal">중복 곡 정리</button>
             <button class="btn-sm danger" @click="resetCrawlData">초기화</button>
           </div>

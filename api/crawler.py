@@ -626,7 +626,6 @@ def crawl_setlists(channel: CrawlChannel, db: Session, max_videos: int = 10) -> 
 
         songs_created = 0
         keys_added = 0
-        refs_added = 0
 
         for video in videos:
             entries = parse_setlist_description(video["description"])
@@ -636,7 +635,6 @@ def crawl_setlists(channel: CrawlChannel, db: Session, max_videos: int = 10) -> 
             for entry in entries:
                 title = entry["title"]
                 key = entry["key"]
-                ts = entry["ts_seconds"]
 
                 song = find_matching_song(title, db)
                 if song is None:
@@ -653,30 +651,8 @@ def crawl_setlists(channel: CrawlChannel, db: Session, max_videos: int = 10) -> 
                     if _augment_song_keys(song, key):
                         keys_added += 1
 
-                # 타임스탬프 ref — youtube_video_id는 'VIDEOID@초'로 합성
-                synthetic_vid = f"{video['video_id']}@{ts}"
-                exists_ref = db.query(SongReference).filter(
-                    SongReference.youtube_video_id == synthetic_vid
-                ).first()
-                if exists_ref:
-                    continue
-
-                ref = SongReference(
-                    song_id=song.id,
-                    channel_id=channel.id,
-                    youtube_url=f"https://www.youtube.com/watch?v={video['video_id']}&t={ts}s",
-                    youtube_video_id=synthetic_vid,
-                    title=f"{video['title']} — {title}",
-                    thumbnail_url=video["thumbnail"],
-                    key=key,
-                    trust_level=channel.trust_level,
-                    source="CRAWL",
-                )
-                db.add(ref)
-                refs_added += 1
-
         log.songs_added = songs_created
-        log.refs_added = refs_added
+        log.refs_added = 0
         log.status = "SUCCESS"
         log.finished_at = datetime.utcnow()
         channel.last_crawled_at = datetime.utcnow()
@@ -689,7 +665,6 @@ def crawl_setlists(channel: CrawlChannel, db: Session, max_videos: int = 10) -> 
             "videos_scanned": log.videos_found,
             "songs_created": songs_created,
             "keys_added": keys_added,
-            "refs_added": refs_added,
         }
     except Exception as e:
         try:
