@@ -476,6 +476,25 @@ def auto_approve_review_queue(_: User = Depends(require_admin), db: Session = De
     }
 
 
+@router.post("/review/reparse-titles")
+def reparse_review_titles(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """PENDING 큐 항목의 parsed_song_title을 현재 parser로 재계산.
+
+    파서가 개선되었을 때, 기존에 쌓여있는 검증 큐를 다시 굴리기 위함.
+    """
+    from crawler import parse_song_title
+
+    items = db.query(ReviewQueue).filter(ReviewQueue.status == "PENDING").all()
+    updated = 0
+    for rq in items:
+        new_title = parse_song_title(rq.video_title or "")
+        if new_title and new_title != rq.parsed_song_title:
+            rq.parsed_song_title = new_title
+            updated += 1
+    db.commit()
+    return {"total": len(items), "updated": updated}
+
+
 @router.post("/review/batch")
 def batch_review(body: dict, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """검증 큐 일괄 처리. body: {"actions": [{"review_id": "...", "action": "approve|reject", "song_id": "...", "song_title": "..."}]}"""

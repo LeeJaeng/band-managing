@@ -486,6 +486,15 @@ async function rejectReview(rq: any) {
   } catch (e: any) { alert(e.message || '거부 실패') }
 }
 
+async function reparseTitles() {
+  if (!confirm('PENDING 큐 항목의 제목을 현재 파서로 재계산하시겠습니까?')) return
+  try {
+    const result = await api<any>(`/api/admin/review/reparse-titles`, { method: 'POST' })
+    alert(`재파싱 완료!\n총 ${result.total}개 중 ${result.updated}개 업데이트됨`)
+    await load()
+  } catch (e: any) { alert(e.message || '재파싱 실패') }
+}
+
 async function autoApproveAll() {
   if (!confirm(`검증 큐 ${rqTotal.value}개 항목을 자동 승인하시겠습니까?\n(애매한 항목은 남겨둡니다)`)) return
   try {
@@ -669,6 +678,7 @@ onMounted(load)
         <div class="section-header">
           <h2>검증 큐 ({{ reviewQueue.length }} / {{ rqTotal }})</h2>
           <div v-if="rqTotal > 0" class="section-actions">
+            <button class="btn" @click="reparseTitles">제목 재파싱</button>
             <button class="btn-accent" @click="autoApproveAll">자동 승인</button>
             <button class="btn" @click="exportReviewQueue">내보내기</button>
           </div>
