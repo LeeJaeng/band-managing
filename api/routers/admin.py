@@ -626,6 +626,7 @@ def update_song_source(song_id: str, body: SongSourceUpdate, _: User = Depends(r
 class MergeBody(BaseModel):
     source_ids: list[str]  # 삭제될 곡들
     target_id: str         # 남길 곡
+    target_title: str | None = None  # 병합 시 target 제목 변경
 
 
 def _normalize_title_for_dedup(title: str) -> str:
@@ -722,6 +723,9 @@ def admin_merge_songs(body: MergeBody, _: User = Depends(require_admin), db: Ses
     target = db.query(Song).filter(Song.id == body.target_id).first()
     if not target:
         raise HTTPException(404, "target 곡을 찾을 수 없습니다")
+
+    if body.target_title and body.target_title.strip():
+        target.title = body.target_title.strip()
 
     for source_id in source_ids:
         source = db.query(Song).filter(Song.id == source_id).first()

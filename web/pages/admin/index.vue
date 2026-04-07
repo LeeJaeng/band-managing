@@ -107,6 +107,7 @@ const dupGroups = ref<any[]>([])
 const dupLoading = ref(false)
 const dupMerging = ref<string | null>(null)  // merging group normalized key
 const dupKeepChoice = ref<Record<string, string>>({})  // normalized → keep song id
+const dupTitleEdit = ref<Record<string, string>>({})  // normalized → 편집된 target 제목
 const showDupModal = ref(false)
 
 async function openDupModal() {
@@ -117,8 +118,14 @@ async function openDupModal() {
     dupGroups.value = res.groups || []
     // 초기 keep 선택: 서버가 추천한 suggested_keep_id
     const init: Record<string, string> = {}
-    for (const g of dupGroups.value) init[g.normalized] = g.suggested_keep_id
+    const initTitle: Record<string, string> = {}
+    for (const g of dupGroups.value) {
+      init[g.normalized] = g.suggested_keep_id
+      const keep = g.songs.find((s: any) => s.id === g.suggested_keep_id)
+      initTitle[g.normalized] = keep?.title || ''
+    }
     dupKeepChoice.value = init
+    dupTitleEdit.value = initTitle
   } catch (e: any) {
     alert(e.message || '중복 곡 조회 실패')
     showDupModal.value = false
@@ -130,6 +137,14 @@ function closeDupModal() {
   showDupModal.value = false
   dupGroups.value = []
   dupKeepChoice.value = {}
+  dupTitleEdit.value = {}
+}
+
+function onDupKeepChange(group: any) {
+  // 라디오 변경 시 편집중인 제목을 새로 선택된 곡 제목으로 리셋
+  const keepId = dupKeepChoice.value[group.normalized]
+  const keep = group.songs.find((s: any) => s.id === keepId)
+  if (keep) dupTitleEdit.value[group.normalized] = keep.title || ''
 }
 
 async function mergeDupGroup(group: any) {
@@ -138,12 +153,18 @@ async function mergeDupGroup(group: any) {
   const sourceIds = group.songs.map((s: any) => s.id).filter((id: string) => id !== keepId)
   if (!sourceIds.length) { alert('병합할 곡이 없습니다.'); return }
   const kept = group.songs.find((s: any) => s.id === keepId)
-  if (!confirm(`"${kept.title}"로 ${sourceIds.length}곡을 병합합니다.\n계속하시겠습니까?`)) return
+  const newTitle = (dupTitleEdit.value[group.normalized] || '').trim()
+  const finalTitle = newTitle || kept.title
+  if (!confirm(`"${finalTitle}"로 ${sourceIds.length}곡을 병합합니다.\n계속하시겠습니까?`)) return
   dupMerging.value = group.normalized
   try {
     await api('/api/admin/songs/merge', {
       method: 'POST',
-      body: JSON.stringify({ source_ids: sourceIds, target_id: keepId }),
+      body: JSON.stringify({
+        source_ids: sourceIds,
+        target_id: keepId,
+        target_title: newTitle && newTitle !== kept.title ? newTitle : undefined,
+      }),
     })
     // 병합된 그룹을 목록에서 제거
     dupGroups.value = dupGroups.value.filter((g: any) => g.normalized !== group.normalized)
@@ -811,12 +832,21 @@ onMounted(load)
                     :name="`dup-${g.normalized}`"
                     :value="s.id"
                     v-model="dupKeepChoice[g.normalized]"
+                    @change="onDupKeepChange(g)"
                   />
                   <span class="dup-song-title">{{ s.title }}</span>
                   <span class="dup-song-meta">
                     {{ s.default_key || '키없음' }} · 레퍼런스 {{ s.ref_count }}
                   </span>
                 </label>
+              </div>
+              <div class="dup-title-edit">
+                <label>병합 후 제목</label>
+                <input
+                  class="input"
+                  v-model="dupTitleEdit[g.normalized]"
+                  placeholder="제목 수정"
+                />
               </div>
               <div class="dup-group-actions">
                 <button
@@ -1199,6 +1229,11 @@ label {
 }
 .dup-song-title { flex: 1; font-size: 14px; }
 .dup-song-meta { font-size: 12px; color: var(--text-dim); }
+.dup-title-edit {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-bottom: 10px;
+  label { font-size: 12px; color: var(--text-dim); margin: 0; }
+}
 .dup-group-actions { display: flex; justify-content: flex-end; }
 
 @media (max-width: 640px) {
