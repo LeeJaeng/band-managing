@@ -5,7 +5,36 @@ const { isAdmin } = useAuth()
 const songs = ref<any[]>([])
 const query = ref('')
 const total = ref(0)
-const loading = ref(true)
+const loading = ref(false)
+
+const selected = ref<Set<string>>(new Set())
+const merging = ref(false)
+
+function toggleSelect(id: string) {
+  const s = new Set(selected.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  selected.value = s
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+const selectedSongs = computed(() => songs.value.filter(s => selected.value.has(s.id)))
+
+async function doMerge(sourceId: string, targetId: string) {
+  const src = songs.value.find(s => s.id === sourceId)!
+  const tgt = songs.value.find(s => s.id === targetId)!
+  if (!confirm(`"${src.title}"의 레퍼런스/악보를 "${tgt.title}"에 합치고 원본을 삭제합니다.\n계속하시겠습니까?`)) return
+  merging.value = true
+  try {
+    await api(`/api/admin/songs/merge?source_id=${sourceId}&target_id=${targetId}`, { method: 'POST' })
+    clearSelection()
+    await search()
+  } catch (e: any) { alert(e.message || '병합 실패') }
+  merging.value = false
+}
 
 async function search() {
   loading.value = true
@@ -13,6 +42,7 @@ async function search() {
   songs.value = data.items
   total.value = data.total
   loading.value = false
+  clearSelection()
 }
 
 async function deleteSong(e: Event, songId: string, title: string) {
@@ -52,7 +82,15 @@ onMounted(search)
     <div v-else-if="songs.length === 0" class="empty">등록된 곡이 없습니다.</div>
 
     <div v-else class="song-list">
-      <div v-for="s in songs" :key="s.id" class="song-card">
+      <div
+        v-for="s in songs"
+        :key="s.id"
+        class="song-card"
+        :class="{ selected: selected.has(s.id) }"
+      >
+        <label v-if="isAdmin" class="checkbox-wrap" @click.prevent="toggleSelect(s.id)">
+          <input type="checkbox" :checked="selected.has(s.id)" @change="toggleSelect(s.id)" />
+        </label>
         <NuxtLink :to="`/songs/${s.id}`" class="song-info">
           <div class="song-title">{{ s.title }}</div>
           <div class="song-meta">
@@ -63,6 +101,35 @@ onMounted(search)
         <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
       </div>
     </div>
+
+    <!-- 병합 바 (2개 선택 시) -->
+    <Teleport to="body">
+      <div v-if="isAdmin && selected.size >= 2" class="merge-bar">
+        <button class="merge-bar-close" @click="clearSelection">✕</button>
+        <span class="merge-bar-label">{{ selected.size }}개 선택됨 — 어떻게 병합할까요?</span>
+        <div class="merge-bar-actions">
+          <button
+            class="merge-btn"
+            :disabled="merging"
+            @click="doMerge(selectedSongs[0].id, selectedSongs[1].id)"
+          >
+            <span class="merge-del">{{ selectedSongs[0].title }}</span>
+            <span class="merge-arrow">→</span>
+            <span class="merge-keep">{{ selectedSongs[1].title }}</span>
+          </button>
+          <button
+            class="merge-btn"
+            :disabled="merging"
+            @click="doMerge(selectedSongs[1].id, selectedSongs[0].id)"
+          >
+            <span class="merge-del">{{ selectedSongs[1].title }}</span>
+            <span class="merge-arrow">→</span>
+            <span class="merge-keep">{{ selectedSongs[0].title }}</span>
+          </button>
+        </div>
+        <span class="merge-bar-hint">삭제 → 남길 곡</span>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -103,6 +170,7 @@ onMounted(search)
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-bottom: 100px; // merge bar 공간
 }
 
 .song-card {
@@ -114,6 +182,21 @@ onMounted(search)
   gap: 12px;
   transition: border-color .15s;
   &:hover { border-color: rgba(139,111,255,0.4); }
+  &.selected { border-color: var(--accent); background: var(--accent-soft); }
+}
+
+.checkbox-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
 }
 
 .song-info {
@@ -155,4 +238,71 @@ onMounted(search)
   &:hover { background: rgba(255,255,255,0.05); }
   &.danger { color: var(--red); &:hover { background: var(--red-soft); } }
 }
+
+// 병합 바
+.merge-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 16px;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 200;
+  min-width: 320px;
+  max-width: 90vw;
+}
+
+.merge-bar-close {
+  position: absolute;
+  top: 10px; right: 14px;
+  background: none; border: none;
+  color: var(--text-dim); font-size: 14px; cursor: pointer;
+  &:hover { color: var(--text); }
+}
+
+.merge-bar-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.merge-bar-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.merge-bar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.merge-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  font-size: 13px;
+  width: 100%;
+  text-align: left;
+  transition: background .15s;
+  &:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+  &:disabled { opacity: .5; cursor: not-allowed; }
+}
+
+.merge-del { color: var(--red); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-arrow { color: var(--text-dim); flex-shrink: 0; }
+.merge-keep { color: var(--green); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 </style>

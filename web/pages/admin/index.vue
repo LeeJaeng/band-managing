@@ -14,50 +14,6 @@ const newKeyword = ref('')
 const loading = ref(true)
 const crawling = ref(false)
 
-// 곡 병합
-const mergeSourceQuery = ref('')
-const mergeSourceResults = ref<any[]>([])
-const mergeSource = ref<any | null>(null)
-const mergeTargetQuery = ref('')
-const mergeTargetResults = ref<any[]>([])
-const mergeTarget = ref<any | null>(null)
-const mergeBusy = ref(false)
-
-async function searchMergeSongs(q: string, resultRef: typeof mergeSourceResults) {
-  if (!q.trim()) { resultRef.value = []; return }
-  const res = await api<any>(`/api/songs?q=${encodeURIComponent(q)}&limit=10&_t=${Date.now()}`).catch(() => ({ items: [] }))
-  resultRef.value = res.items || []
-}
-
-const mergeSourceTimers = { t: 0 as any }
-const mergeTargetTimers = { t: 0 as any }
-
-function onMergeSourceInput() {
-  clearTimeout(mergeSourceTimers.t)
-  mergeSource.value = null
-  mergeSourceTimers.t = setTimeout(() => searchMergeSongs(mergeSourceQuery.value, mergeSourceResults), 350)
-}
-
-function onMergeTargetInput() {
-  clearTimeout(mergeTargetTimers.t)
-  mergeTarget.value = null
-  mergeTargetTimers.t = setTimeout(() => searchMergeSongs(mergeTargetQuery.value, mergeTargetResults), 350)
-}
-
-async function doMerge() {
-  if (!mergeSource.value || !mergeTarget.value) { alert('두 곡을 모두 선택해주세요.'); return }
-  if (mergeSource.value.id === mergeTarget.value.id) { alert('같은 곡입니다.'); return }
-  if (!confirm(`"${mergeSource.value.title}"을 "${mergeTarget.value.title}"에 병합하고 원본을 삭제하시겠습니까?`)) return
-  mergeBusy.value = true
-  try {
-    await api(`/api/admin/songs/merge?source_id=${mergeSource.value.id}&target_id=${mergeTarget.value.id}`, { method: 'POST' })
-    alert('병합 완료!')
-    mergeSourceQuery.value = ''; mergeSource.value = null; mergeSourceResults.value = []
-    mergeTargetQuery.value = ''; mergeTarget.value = null; mergeTargetResults.value = []
-  } catch (e: any) { alert(e.message || '병합 실패') }
-  mergeBusy.value = false
-}
-
 // 제목 입력 자동 검색 (검증 큐)
 const titleSearchCache = ref<Record<string, any[]>>({})
 const titleSearchTimers = {} as Record<string, ReturnType<typeof setTimeout>>
@@ -700,37 +656,6 @@ onMounted(load)
         </div>
       </section>
 
-      <!-- 곡 병합 -->
-      <section class="section">
-        <h2>곡 병합</h2>
-        <p class="section-desc">중복된 곡을 하나로 합칩니다. 원본 곡의 레퍼런스/악보/콘티 항목이 모두 대상 곡으로 이전되고 원본은 삭제됩니다.</p>
-        <div class="merge-grid">
-          <div class="merge-box">
-            <label>삭제할 곡 (원본)</label>
-            <input v-model="mergeSourceQuery" type="text" class="input-field" placeholder="곡 검색..." @input="onMergeSourceInput" />
-            <div v-if="mergeSourceResults.length > 0 && !mergeSource" class="merge-results">
-              <div v-for="s in mergeSourceResults" :key="s.id" class="merge-result-item" @click="() => { mergeSource = s; mergeSourceQuery = s.title; mergeSourceResults = [] }">
-                {{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span>
-              </div>
-            </div>
-            <div v-if="mergeSource" class="merge-selected">선택됨: <strong>{{ mergeSource.title }}</strong></div>
-          </div>
-          <div class="merge-arrow">→</div>
-          <div class="merge-box">
-            <label>남길 곡 (대상)</label>
-            <input v-model="mergeTargetQuery" type="text" class="input-field" placeholder="곡 검색..." @input="onMergeTargetInput" />
-            <div v-if="mergeTargetResults.length > 0 && !mergeTarget" class="merge-results">
-              <div v-for="s in mergeTargetResults" :key="s.id" class="merge-result-item" @click="() => { mergeTarget = s; mergeTargetQuery = s.title; mergeTargetResults = [] }">
-                {{ s.title }}<span v-if="s.artist" class="rv-artist"> · {{ s.artist }}</span>
-              </div>
-            </div>
-            <div v-if="mergeTarget" class="merge-selected">선택됨: <strong>{{ mergeTarget.title }}</strong></div>
-          </div>
-        </div>
-        <button class="btn-accent" @click="doMerge" :disabled="mergeBusy || !mergeSource || !mergeTarget">
-          {{ mergeBusy ? '병합 중...' : '병합 실행' }}
-        </button>
-      </section>
     </template>
   </div>
 </template>
@@ -1019,20 +944,6 @@ label {
   &:hover { color: var(--red); }
 }
 
-.merge-grid {
-  display: flex; gap: 12px; align-items: flex-start;
-  margin-bottom: 12px;
-}
-.merge-box { flex: 1; display: flex; flex-direction: column; gap: 6px; label { font-size: 12px; font-weight: 600; color: var(--text-dim); } }
-.merge-arrow { padding-top: 28px; color: var(--text-dim); font-size: 20px; flex-shrink: 0; }
-.merge-results {
-  @include card; padding: 4px 0; max-height: 160px; overflow-y: auto;
-}
-.merge-result-item {
-  padding: 7px 12px; font-size: 13px; cursor: pointer;
-  &:hover { background: var(--accent-soft); }
-}
-.merge-selected { font-size: 13px; color: var(--text-dim); padding: 4px 0; }
 
 @media (max-width: 640px) {
   .section-header { flex-direction: column; align-items: flex-start; }
