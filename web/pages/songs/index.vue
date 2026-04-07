@@ -5,6 +5,8 @@ const { isAdmin } = useAuth()
 const songs = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
+const loadingMore = ref(false)
+const PAGE_SIZE = 100
 
 // 검색 & 필터
 const query = ref('')
@@ -113,19 +115,43 @@ async function deleteSong(e: Event, songId: string, title: string) {
   } catch (err: any) { alert(err.message || '삭제 실패') }
 }
 
-async function search() {
-  loading.value = true
-  const params = new URLSearchParams({ q: query.value, limit: '100' })
+function buildSearchParams(offset: number) {
+  const params = new URLSearchParams({
+    q: query.value,
+    limit: String(PAGE_SIZE),
+    offset: String(offset),
+  })
   if (filterKey.value === 'NO_KEY') params.set('no_key', 'true')
   else if (filterKey.value) params.set('key_filter', filterKey.value)
   if (filterTempo.value === 'NO_TEMPO') params.set('no_tempo', 'true')
   else if (filterTempo.value) params.set('tempo', filterTempo.value)
   if (filterChannel.value) params.set('channel_id', filterChannel.value)
+  return params
+}
+
+async function search() {
+  loading.value = true
+  const params = buildSearchParams(0)
   const data = await api<any>(`/api/songs?${params}`)
   songs.value = data.items
   total.value = data.total
   loading.value = false
   clearSelection()
+}
+
+async function loadMore() {
+  if (loadingMore.value) return
+  if (songs.value.length >= total.value) return
+  loadingMore.value = true
+  try {
+    const params = buildSearchParams(songs.value.length)
+    const data = await api<any>(`/api/songs?${params}`)
+    songs.value = [...songs.value, ...data.items]
+    total.value = data.total
+  } catch (e: any) {
+    alert(e.message || '추가 로드 실패')
+  }
+  loadingMore.value = false
 }
 
 function resetFilters() {
@@ -213,6 +239,12 @@ onMounted(async () => {
         <button v-if="isAdmin" class="btn-sm danger" @click="deleteSong($event, s.id, s.title)">삭제</button>
       </div>
       </template>
+    </div>
+
+    <div v-if="!loading && songs.length < total && !groupDuplicates" class="load-more-wrap">
+      <button class="btn load-more" :disabled="loadingMore" @click="loadMore">
+        {{ loadingMore ? '불러오는 중...' : `더보기 (${songs.length} / ${total})` }}
+      </button>
     </div>
 
     <!-- 선택 액션 바 -->
@@ -328,6 +360,9 @@ onMounted(async () => {
 .loading, .empty { text-align: center; padding: 40px; color: var(--text-dim); }
 
 .song-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 120px; }
+
+.load-more-wrap { display: flex; justify-content: center; margin: 16px 0 140px; }
+.load-more { min-width: 200px; padding: 12px 24px; font-size: 14px; }
 
 .dup-group-label {
   font-size: 12px; font-weight: 700; color: var(--accent);
