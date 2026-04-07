@@ -186,6 +186,25 @@ def test_setlist_dedup():
     assert len(items) == 1
 
 
+def test_setlist_strip_numbering_and_english():
+    desc = (
+        "13:07 1. 날마다 숨쉬는 순간마다 (Day by Day) | -D\n"
+        "20:00 10. 시편 139편 Psalm 139 | E\n"
+        "60:00 1.RE_ 주님의 임재를_Your Presence | A\n"
+    )
+    items = parse_setlist_description(desc)
+    titles = [it["title"] for it in items]
+    assert "날마다 숨쉬는 순간마다" in titles
+    assert "시편 139편" in titles
+    assert "주님의 임재를" in titles
+
+
+def test_setlist_strip_paren_english_with_comma():
+    desc = "25:00 1. 우물가의 여인처럼 + 주께 가까이 (Fill my cup, Lord) | -G"
+    items = parse_setlist_description(desc)
+    assert items[0]["title"] == "우물가의 여인처럼 + 주께 가까이"
+
+
 def test_ts_to_seconds():
     assert _ts_to_seconds("00:00") == 0
     assert _ts_to_seconds("05:30") == 330
