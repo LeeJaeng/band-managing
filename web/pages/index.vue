@@ -1,26 +1,21 @@
 <script setup lang="ts">
 const { api } = useApi()
 
-const contis = ref<any[]>([])
-const loading = ref(true)
-const loadError = ref('')
+// SSR에서 목록을 미리 로드 — 빈 화면/스턱 로딩 방지
+const { data, pending: loading, error: fetchError, refresh } = await useAsyncData(
+  'conti-list',
+  () => api<any>('/api/contis'),
+  { default: () => ({ items: [] }) },
+)
 
-async function load() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    const data = await api<any>('/api/contis')
-    contis.value = data.items || []
-  } catch (e: any) {
-    console.error('conti list load error:', e)
-    contis.value = []
-    loadError.value = e?.data?.detail || e?.message || '콘티 목록을 불러오지 못했습니다.'
-  } finally {
-    loading.value = false
-  }
-}
+const contis = computed<any[]>(() => data.value?.items || [])
+const loadError = computed(() => {
+  if (!fetchError.value) return ''
+  const e: any = fetchError.value
+  return e?.data?.detail || e?.message || '콘티 목록을 불러오지 못했습니다.'
+})
 
-onMounted(load)
+async function load() { await refresh() }
 </script>
 
 <template>

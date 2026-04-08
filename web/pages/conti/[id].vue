@@ -3,9 +3,25 @@ definePageMeta({})
 const route = useRoute()
 const { api } = useApi()
 
-const conti = ref<any>(null)
-const loading = ref(true)
-const loadError = ref('')
+// SSR 단계에서 콘티를 미리 로드 — 클라이언트 JS가 늦어도 내용이 보이도록
+const contiId = computed(() => route.params.id as string)
+const { data: conti, pending: loading, error: fetchError, refresh } = await useAsyncData(
+  () => `conti-${contiId.value}`,
+  () => api<any>(`/api/contis/${contiId.value}`),
+  { watch: [contiId], default: () => null },
+)
+
+const loadError = computed(() => {
+  if (!fetchError.value) return ''
+  const e: any = fetchError.value
+  const status = e?.response?.status || e?.statusCode || e?.status
+  if (status === 404) return '콘티를 찾을 수 없습니다.'
+  if (status === 401 || status === 403) return '이 콘티에 접근할 권한이 없습니다.'
+  return e?.data?.detail || e?.message || '콘티를 불러오지 못했습니다.'
+})
+
+async function load() { await refresh() }
+
 const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const searching = ref(false)
@@ -92,25 +108,6 @@ const availableMembers = computed(() => {
   return teamMembers.value.filter(m => !assignedIds.has(m.id))
 })
 
-async function load() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    conti.value = await api<any>(`/api/contis/${route.params.id}`)
-  } catch (e: any) {
-    console.error('conti load error:', e)
-    conti.value = null
-    const status = e?.response?.status || e?.statusCode || e?.status
-    if (status === 404) {
-      loadError.value = '콘티를 찾을 수 없습니다.'
-    } else if (status === 401 || status === 403) {
-      loadError.value = '이 콘티에 접근할 권한이 없습니다.'
-    } else {
-      loadError.value = e?.data?.detail || e?.message || '콘티를 불러오지 못했습니다.'
-    }
-  }
-  loading.value = false
-}
 
 async function searchSongs() {
   if (!searchQuery.value.trim()) return
@@ -228,10 +225,7 @@ async function copyShareLink() {
   setTimeout(() => { copied.value = '' }, 2000)
 }
 
-onMounted(() => {
-  load()
-  loadTeamMembers()
-})
+onMounted(loadTeamMembers)
 </script>
 
 <template>
