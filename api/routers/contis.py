@@ -126,33 +126,59 @@ def get_conti(conti_id: str, db: Session = Depends(get_db)):
     )
     if not conti:
         raise HTTPException(404, "Conti not found")
-    members_out = []
-    for cm in conti.members:
-        # 팀원이 삭제됐을 수 있음 (FK dangling 방어)
-        if cm.member is None:
-            members_out.append({
-                "id": cm.id,
-                "member_id": cm.member_id,
-                "name": "(삭제된 팀원)",
-                "position": cm.position,
-            })
-        else:
-            members_out.append({
-                "id": cm.id,
-                "member_id": cm.member.id,
-                "name": cm.member.name,
-                "position": cm.position,
-            })
-    return {
-        "id": conti.id,
-        "date": conti.date.isoformat() if conti.date else None,
-        "service_name": conti.service_name,
-        "author": conti.author,
-        "status": conti.status,
-        "created_at": conti.created_at.isoformat() if conti.created_at else None,
-        "items": [_serialize_item(item) for item in conti.items],
-        "members": members_out,
-    }
+    try:
+        members_out = []
+        for cm in conti.members:
+            # 팀원이 삭제됐을 수 있음 (FK dangling 방어)
+            if cm.member is None:
+                members_out.append({
+                    "id": cm.id,
+                    "member_id": cm.member_id,
+                    "name": "(삭제된 팀원)",
+                    "position": cm.position,
+                })
+            else:
+                members_out.append({
+                    "id": cm.id,
+                    "member_id": cm.member.id,
+                    "name": cm.member.name,
+                    "position": cm.position,
+                })
+        items_out = []
+        for item in conti.items:
+            try:
+                items_out.append(_serialize_item(item))
+            except Exception as item_err:
+                # 개별 곡 직렬화 실패 시 placeholder로 대체 (전체 200 유지)
+                import traceback
+                print(f"[get_conti] item serialize failed id={item.id}: {item_err}\n{traceback.format_exc()}", flush=True)
+                items_out.append({
+                    "id": item.id,
+                    "order_num": item.order_num,
+                    "slot_label": item.slot_label or "",
+                    "use_key": item.use_key,
+                    "memo": item.memo,
+                    "song": {"id": item.song_id, "title": "(불러오기 실패)", "artist": None, "default_key": None, "keys": None},
+                    "reference": None,
+                    "_error": f"{type(item_err).__name__}: {item_err}",
+                })
+        return {
+            "id": conti.id,
+            "date": conti.date.isoformat() if conti.date else None,
+            "service_name": conti.service_name,
+            "author": conti.author,
+            "status": conti.status,
+            "created_at": conti.created_at.isoformat() if conti.created_at else None,
+            "items": items_out,
+            "members": members_out,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[get_conti] serialization failed conti_id={conti_id}: {e}\n{tb}", flush=True)
+        raise HTTPException(500, f"콘티 직렬화 실패: {type(e).__name__}: {e}")
 
 
 @router.post("", status_code=201)
