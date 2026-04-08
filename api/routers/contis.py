@@ -126,23 +126,32 @@ def get_conti(conti_id: str, db: Session = Depends(get_db)):
     )
     if not conti:
         raise HTTPException(404, "Conti not found")
+    members_out = []
+    for cm in conti.members:
+        # 팀원이 삭제됐을 수 있음 (FK dangling 방어)
+        if cm.member is None:
+            members_out.append({
+                "id": cm.id,
+                "member_id": cm.member_id,
+                "name": "(삭제된 팀원)",
+                "position": cm.position,
+            })
+        else:
+            members_out.append({
+                "id": cm.id,
+                "member_id": cm.member.id,
+                "name": cm.member.name,
+                "position": cm.position,
+            })
     return {
         "id": conti.id,
-        "date": conti.date.isoformat(),
+        "date": conti.date.isoformat() if conti.date else None,
         "service_name": conti.service_name,
         "author": conti.author,
         "status": conti.status,
         "created_at": conti.created_at.isoformat() if conti.created_at else None,
         "items": [_serialize_item(item) for item in conti.items],
-        "members": [
-            {
-                "id": cm.id,
-                "member_id": cm.member.id,
-                "name": cm.member.name,
-                "position": cm.position,
-            }
-            for cm in conti.members
-        ],
+        "members": members_out,
     }
 
 

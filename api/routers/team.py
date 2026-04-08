@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from db import get_db
-from models import TeamMember, User
+from models import TeamMember, ContiMember, User
 from auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/team", tags=["team"])
@@ -88,6 +88,8 @@ def delete_member(member_id: str, _: User = Depends(require_admin), db: Session 
     member = db.query(TeamMember).filter(TeamMember.id == member_id).first()
     if not member:
         raise HTTPException(404, "Member not found")
+    # 콘티에 배정된 흔적부터 먼저 정리 (FK dangling 방지)
+    db.query(ContiMember).filter(ContiMember.member_id == member_id).delete()
     db.delete(member)
     db.commit()
     return {"ok": True}
