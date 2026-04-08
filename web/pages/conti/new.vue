@@ -2,24 +2,41 @@
 definePageMeta({})
 const router = useRouter()
 const { api } = useApi()
+const { user } = useAuth()
 
 const form = ref({
   date: new Date().toISOString().slice(0, 10),
   service_name: '',
-  author: '',
+  author: user.value?.display_name || '',
 })
 const error = ref('')
+const saving = ref(false)
+
+// 로그인 유저 로드가 늦어지면 그때 채워 넣기
+watch(user, (u) => {
+  if (u && !form.value.author) {
+    form.value.author = u.display_name || ''
+  }
+})
 
 async function create() {
+  error.value = ''
   if (!form.value.service_name || !form.value.author) {
     error.value = '예배명과 작성자를 입력해주세요.'
     return
   }
-  const data = await api<any>('/api/contis', {
-    method: 'POST',
-    body: JSON.stringify(form.value),
-  })
-  router.push(`/conti/${data.id}`)
+  saving.value = true
+  try {
+    const data = await api<any>('/api/contis', {
+      method: 'POST',
+      body: JSON.stringify(form.value),
+    })
+    router.push(`/conti/${data.id}`)
+  } catch (e: any) {
+    error.value = e?.data?.detail || e?.message || '콘티 등록에 실패했습니다.'
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -39,7 +56,9 @@ async function create() {
 
       <div v-if="error" class="error">{{ error }}</div>
 
-      <button class="btn-accent" @click="create">만들기</button>
+      <button class="btn-accent" :disabled="saving" @click="create">
+        {{ saving ? '만드는 중...' : '만들기' }}
+      </button>
     </div>
   </div>
 </template>

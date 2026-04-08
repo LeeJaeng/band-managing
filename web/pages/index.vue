@@ -3,12 +3,21 @@ const { api } = useApi()
 
 const contis = ref<any[]>([])
 const loading = ref(true)
+const loadError = ref('')
 
 async function load() {
   loading.value = true
-  const data = await api<any>('/api/contis')
-  contis.value = data.items
-  loading.value = false
+  loadError.value = ''
+  try {
+    const data = await api<any>('/api/contis')
+    contis.value = data.items || []
+  } catch (e: any) {
+    console.error('conti list load error:', e)
+    contis.value = []
+    loadError.value = e?.data?.detail || e?.message || '콘티 목록을 불러오지 못했습니다.'
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
@@ -22,6 +31,11 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="loading">불러오는 중...</div>
+
+    <div v-else-if="loadError" class="load-error">
+      <p>{{ loadError }}</p>
+      <button class="btn-retry" @click="load">다시 시도</button>
+    </div>
 
     <div v-else-if="contis.length === 0" class="empty">
       아직 콘티가 없습니다. 첫 콘티를 만들어보세요.
@@ -63,6 +77,20 @@ onMounted(load)
   text-align: center;
   padding: 60px 0;
   color: var(--text-dim);
+}
+
+.load-error {
+  @include card;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-dim);
+
+  p { margin: 0 0 16px; font-size: 14px; }
+}
+
+.btn-retry {
+  @include btn;
+  padding: 8px 20px;
 }
 
 .conti-list {

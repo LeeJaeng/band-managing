@@ -5,6 +5,7 @@ const { api } = useApi()
 
 const conti = ref<any>(null)
 const loading = ref(true)
+const loadError = ref('')
 const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const searching = ref(false)
@@ -93,11 +94,20 @@ const availableMembers = computed(() => {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     conti.value = await api<any>(`/api/contis/${route.params.id}`)
   } catch (e: any) {
     console.error('conti load error:', e)
     conti.value = null
+    const status = e?.response?.status || e?.statusCode || e?.status
+    if (status === 404) {
+      loadError.value = '콘티를 찾을 수 없습니다.'
+    } else if (status === 401 || status === 403) {
+      loadError.value = '이 콘티에 접근할 권한이 없습니다.'
+    } else {
+      loadError.value = e?.data?.detail || e?.message || '콘티를 불러오지 못했습니다.'
+    }
   }
   loading.value = false
 }
@@ -227,6 +237,14 @@ onMounted(() => {
 <template>
   <div class="page">
     <div v-if="loading" class="loading">불러오는 중...</div>
+
+    <div v-else-if="loadError" class="load-error">
+      <p>{{ loadError }}</p>
+      <div class="load-error-actions">
+        <button class="btn" @click="load">다시 시도</button>
+        <NuxtLink to="/" class="btn">콘티 목록으로</NuxtLink>
+      </div>
+    </div>
 
     <template v-else-if="conti">
       <div class="conti-header">
@@ -747,6 +765,21 @@ onMounted(() => {
   text-align: center;
   color: var(--text-dim);
   padding: 20px;
+}
+
+.load-error {
+  @include card;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-dim);
+
+  p { margin: 0 0 16px; font-size: 14px; }
+}
+
+.load-error-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 
 .search-results {
