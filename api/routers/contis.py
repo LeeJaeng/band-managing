@@ -1,7 +1,7 @@
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from pydantic import BaseModel
 
 from db import get_db
@@ -114,16 +114,23 @@ def list_contis(
 
 @router.get("/{conti_id}")
 def get_conti(conti_id: str, db: Session = Depends(get_db)):
-    conti = (
-        db.query(Conti)
-        .options(
-            joinedload(Conti.items).joinedload(ContiItem.song),
-            joinedload(Conti.items).joinedload(ContiItem.reference),
-            joinedload(Conti.members).joinedload(ContiMember.member),
+    print(f"[get_conti] start conti_id={conti_id}", flush=True)
+    try:
+        conti = (
+            db.query(Conti)
+            .options(
+                selectinload(Conti.items).selectinload(ContiItem.song),
+                selectinload(Conti.items).selectinload(ContiItem.reference),
+                selectinload(Conti.members).selectinload(ContiMember.member),
+            )
+            .filter(Conti.id == conti_id)
+            .first()
         )
-        .filter(Conti.id == conti_id)
-        .first()
-    )
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[get_conti] query failed conti_id={conti_id}: {e}\n{tb}", flush=True)
+        raise HTTPException(500, f"콘티 조회 실패: {type(e).__name__}: {e}")
     if not conti:
         raise HTTPException(404, "Conti not found")
     try:

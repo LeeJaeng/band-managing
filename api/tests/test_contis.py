@@ -169,6 +169,91 @@ def test_delete_item(client, member_headers):
     assert len(detail["items"]) == 0
 
 
+# ── 직렬화 방어 (회귀 방지) ─────────────────────────
+
+def test_get_conti_with_dangling_member(client, member_headers, db):
+    """conti_member.member_id가 가리키는 team_member가 사라져도 500이 안 나야 함."""
+    from models import TeamMember, Conti, ContiMember
+
+    member = TeamMember(name="삭제될팀원", position="VOCAL")
+    db.add(member)
+    db.commit()
+
+    conti = client.post("/api/contis", json={
+        "date": "2026-04-06", "service_name": "테스트", "author": "A",
+    }, headers=member_headers).json()
+
+    client.post(f"/api/contis/{conti['id']}/members", json={
+        "member_id": member.id, "position": "VOCAL",
+    }, headers=member_headers)
+
+    # FK 우회: SQLite는 PRAGMA foreign_keys=OFF가 기본 → 직접 행 삭제로 dangling 상태 만든다
+    db.query(TeamMember).filter(TeamMember.id == member.id).delete()
+    db.commit()
+
+    resp = client.get(f"/api/contis/{conti['id']}")
+    assert resp.status_code == 200
+    members = resp.json()["members"]
+    assert len(members) == 1
+    assert members[0]["name"] == "(삭제된 팀원)"
+
+
+def test_get_conti_with_dangling_song(client, member_headers, db):
+    """conti_item.song_id가 가리키는 song이 사라져도 500이 안 나야 함."""
+    from models import Song
+
+    song_id = _create_song(client, member_headers, "사라질곡")
+    conti = client.post("/api/contis", json={
+        "date": "2026-04-06", "service_name": "테스트", "author": "A",
+    }, headers=member_headers).json()
+    client.post(f"/api/contis/{conti['id']}/items", json={
+        "song_id": song_id, "order_num": 1, "slot_label": "1번곡",
+    }, headers=member_headers)
+
+    db.query(Song).filter(Song.id == song_id).delete()
+    db.commit()
+
+    resp = client.get(f"/api/contis/{conti['id']}")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    # song 필드는 None이거나 placeholder여야 하고, 어쨌든 200으로 반환
+    assert items[0]["song"] is None or items[0]["song"]["title"]
+
+
+def test_get_conti_with_null_optional_fields(client, member_headers, db):
+    """slot_label/use_key/memo가 NULL이어도 직렬화가 깨지지 않아야 함."""
+    from models import ContiItem
+
+    song_id = _create_song(client, member_headers, "null필드곡")
+    conti = client.post("/api/contis", json={
+        "date": "2026-04-06", "service_name": "테스트", "author": "A",
+    }, headers=member_headers).json()
+
+    # ORM으로 직접 NULL slot_label 삽입 (POST 스키마의 default="" 우회)
+    item = ContiItem(
+        conti_id=conti["id"],
+        song_id=song_id,
+        order_num=1,
+        slot_label=None,
+        use_key=None,
+        memo=None,
+    )
+    db.add(item)
+    db.commit()
+
+    resp = client.get(f"/api/contis/{conti['id']}")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["use_key"] is None
+
+
+def test_get_conti_not_found(client):
+    resp = client.get("/api/contis/nonexistent-uuid")
+    assert resp.status_code == 404
+
+
 def test_reorder_items(client, member_headers):
     song1 = _create_song(client, member_headers, "A곡")
     song2 = _create_song(client, member_headers, "B곡")
