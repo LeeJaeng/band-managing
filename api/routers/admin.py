@@ -595,6 +595,57 @@ def reject_review(review_id: str, _: User = Depends(require_admin), db: Session 
     return {"ok": True}
 
 
+@router.delete("/review-queue")
+def clear_review_queue(
+    status: str = Query(default="PENDING"),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """검증 큐 전체 삭제 (기본: PENDING만)."""
+    deleted = db.query(ReviewQueue).filter(ReviewQueue.status == status).delete()
+    db.commit()
+    return {"ok": True, "deleted": deleted}
+
+
+class FilterAndPurgeBody(BaseModel):
+    keyword: str
+
+
+@router.post("/review/filter-and-purge")
+def filter_and_purge_review(
+    body: FilterAndPurgeBody,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """필터 키워드를 추가하고, PENDING 큐에서 해당 키워드를 포함한 항목을 일괄 거부.
+
+    크롤링 결과를 보다가 "이런 단어 들어간 영상은 다 빼자" 싶을 때 사용.
+    이미 등록된 키워드면 추가는 건너뛰고 거부만 수행.
+    """
+    kw = (body.keyword or "").strip().lower()
+    if not kw:
+        raise HTTPException(400, "키워드를 입력해주세요")
+
+    existing = db.query(CrawlFilterKeyword).filter(CrawlFilterKeyword.keyword == kw).first()
+    keyword_added = False
+    if not existing:
+        db.add(CrawlFilterKeyword(keyword=kw))
+        keyword_added = True
+
+    pending = db.query(ReviewQueue).filter(ReviewQueue.status == "PENDING").all()
+    rejected = 0
+    for rq in pending:
+        title_l = (rq.video_title or "").lower()
+        parsed_l = (rq.parsed_song_title or "").lower()
+        if kw in title_l or kw in parsed_l:
+            rq.status = "REJECTED"
+            rq.reviewed_at = datetime.utcnow()
+            rejected += 1
+
+    db.commit()
+    return {"keyword": kw, "keyword_added": keyword_added, "rejected": rejected}
+
+
 # ── User Songs Review ─────────────────────────────────
 
 class SongSourceUpdate(BaseModel):

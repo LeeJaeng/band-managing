@@ -578,6 +578,37 @@ async function rejectReview(rq: any) {
   } catch (e: any) { alert(e.message || '거부 실패') }
 }
 
+async function clearReviewQueue() {
+  if (rqTotal.value === 0) { alert('삭제할 항목이 없습니다.'); return }
+  if (!confirm(`PENDING 검증 큐 ${rqTotal.value}개를 모두 삭제하시겠습니까?\n(되돌릴 수 없음)`)) return
+  try {
+    const res = await api<any>('/api/admin/review-queue', { method: 'DELETE' })
+    alert(`삭제 완료: ${res.deleted}개`)
+    await loadReviewQueue()
+  } catch (e: any) { alert(e.message || '삭제 실패') }
+}
+
+async function filterAndPurge(rq: any) {
+  // 제목에서 단어 추천 — 가장 긴 토큰 우선 (의미 있는 단어일 가능성 높음)
+  const source = (rq.video_title || rq.parsed_song_title || '').trim()
+  const tokens = source.split(/[\s\-\|\[\]\(\)·]+/).filter((t: string) => t.length >= 2)
+  const suggested = tokens.sort((a: string, b: string) => b.length - a.length)[0] || ''
+  const kw = window.prompt(
+    `이 영상에서 필터링할 단어를 입력하세요.\n(이 단어가 포함된 PENDING 항목은 모두 거부됩니다)`,
+    suggested,
+  )
+  if (!kw || !kw.trim()) return
+  try {
+    const res = await api<any>('/api/admin/review/filter-and-purge', {
+      method: 'POST',
+      body: JSON.stringify({ keyword: kw.trim() }),
+    })
+    const addedMsg = res.keyword_added ? '필터에 추가됨' : '이미 등록된 키워드'
+    alert(`"${res.keyword}" — ${addedMsg}\n거부된 항목: ${res.rejected}개`)
+    await load()
+  } catch (e: any) { alert(e?.data?.detail || e.message || '필터 적용 실패') }
+}
+
 async function deleteSetlistRefs() {
   if (!confirm('예배 실황 세트리스트로 생성된 타임스탬프 레퍼런스를 모두 삭제할까요?\n(이후 세트리스트 크롤은 곡/키만 추가하고 ref는 만들지 않습니다)')) return
   try {
@@ -783,6 +814,7 @@ onMounted(load)
             <button class="btn" @click="reparseTitles">제목 재파싱</button>
             <button class="btn-accent" @click="autoApproveAll">자동 승인</button>
             <button class="btn" @click="exportReviewQueue">내보내기</button>
+            <button class="btn-sm danger" @click="clearReviewQueue">전체 삭제</button>
           </div>
         </div>
         <div v-if="rqTotal === 0" class="empty">대기 중인 항목 없음</div>
@@ -885,6 +917,7 @@ onMounted(load)
           </div>
           <div class="rv-actions">
             <button class="btn-sm approve" @click="approveAsNew(rq)">새 곡으로 등록</button>
+            <button class="btn-sm" @click="filterAndPurge(rq)">필터 추가</button>
             <button class="btn-sm danger" @click="rejectReview(rq)">거부</button>
           </div>
         </div>

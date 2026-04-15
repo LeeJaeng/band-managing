@@ -161,6 +161,18 @@ async function confirmConti() {
   await load()
 }
 
+const router = useRouter()
+async function deleteConti() {
+  if (!conti.value) return
+  if (!confirm(`"${conti.value.service_name}" 콘티를 삭제하시겠습니까?`)) return
+  try {
+    await api(`/api/contis/${route.params.id}`, { method: 'DELETE' })
+    await router.push('/')
+  } catch (e: any) {
+    alert(e?.data?.detail || e?.message || '삭제 실패')
+  }
+}
+
 // 공유 기능
 const copied = ref('')
 
@@ -257,6 +269,7 @@ onMounted(loadTeamMembers)
             {{ copied === 'link' ? '복사됨!' : '링크 복사' }}
           </button>
           <button v-if="conti.status === 'DRAFT'" class="btn-accent" @click="confirmConti">확정</button>
+          <button class="btn-delete" @click="deleteConti">삭제</button>
         </div>
       </div>
 
@@ -448,6 +461,14 @@ onMounted(loadTeamMembers)
   color: var(--accent);
   border-color: var(--accent);
   &:hover { background: var(--accent-soft); }
+}
+.btn-delete {
+  @include btn;
+  font-size: 12px;
+  padding: 6px 12px;
+  color: var(--red);
+  border-color: var(--red);
+  &:hover { background: var(--red-soft); }
 }
 .input { @include input; }
 

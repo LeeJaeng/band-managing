@@ -194,3 +194,136 @@ def test_update_song_source_requires_admin(client, member_headers):
     song_id = resp.json()["id"]
     resp = client.put(f"/api/admin/songs/{song_id}/source", json={"source": "MANUAL"}, headers=member_headers)
     assert resp.status_code == 403
+
+
+# ── Review Queue 일괄 삭제 / 필터 ─────────────────────────
+
+def test_clear_review_queue(client, admin_headers, db):
+    """검증 큐 PENDING 항목 일괄 삭제."""
+    from models import ReviewQueue, CrawlChannel
+
+    ch = CrawlChannel(
+        name="ch",
+        youtube_channel_url="https://youtube.com/@x",
+        youtube_channel_id="UC_clear_test",
+    )
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+
+    for i in range(3):
+        db.add(ReviewQueue(
+            youtube_video_id=f"clr_vid{i}",
+            youtube_url=f"https://youtube.com/watch?v=clr_vid{i}",
+            video_title=f"영상 {i}",
+            channel_id=ch.id,
+        ))
+    # APPROVED 항목 1개 — 삭제되면 안 됨
+    db.add(ReviewQueue(
+        youtube_video_id="clr_appr",
+        youtube_url="https://youtube.com/watch?v=clr_appr",
+        video_title="이미 승인",
+        channel_id=ch.id,
+        status="APPROVED",
+    ))
+    db.commit()
+
+    resp = client.delete("/api/admin/review-queue", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 3
+
+    remaining = db.query(ReviewQueue).count()
+    assert remaining == 1  # APPROVED 1개만 남음
+
+
+def test_filter_and_purge_review(client, admin_headers, db):
+    """필터 키워드 추가 + 키워드 포함된 PENDING 항목 일괄 거부."""
+    from models import ReviewQueue, CrawlChannel, CrawlFilterKeyword
+
+    ch = CrawlChannel(
+        name="ch",
+        youtube_channel_url="https://youtube.com/@y",
+        youtube_channel_id="UC_filter_test",
+    )
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+
+    rq1 = ReviewQueue(
+        youtube_video_id="fp_vid1",
+        youtube_url="https://youtube.com/watch?v=fp_vid1",
+        video_title="2024년 부활절 예배 실황",
+        channel_id=ch.id,
+        parsed_song_title="부활절 예배",
+    )
+    rq2 = ReviewQueue(
+        youtube_video_id="fp_vid2",
+        youtube_url="https://youtube.com/watch?v=fp_vid2",
+        video_title="은혜 (Live)",
+        channel_id=ch.id,
+        parsed_song_title="은혜",
+    )
+    db.add_all([rq1, rq2])
+    db.commit()
+
+    resp = client.post(
+        "/api/admin/review/filter-and-purge",
+        json={"keyword": "예배 실황"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["keyword"] == "예배 실황"
+    assert body["keyword_added"] is True
+    assert body["rejected"] == 1
+
+    # 키워드 등록 확인
+    assert db.query(CrawlFilterKeyword).filter(CrawlFilterKeyword.keyword == "예배 실황").first() is not None
+
+    # rq1 거부됨, rq2 유지
+    db.refresh(rq1)
+    db.refresh(rq2)
+    assert rq1.status == "REJECTED"
+    assert rq2.status == "PENDING"
+
+
+def test_filter_and_purge_skips_existing_keyword(client, admin_headers, db):
+    """이미 등록된 키워드면 추가 안 하고 거부만 수행."""
+    from models import ReviewQueue, CrawlChannel, CrawlFilterKeyword
+
+    ch = CrawlChannel(
+        name="ch",
+        youtube_channel_url="https://youtube.com/@z",
+        youtube_channel_id="UC_filter_dup",
+    )
+    db.add(ch)
+    db.add(CrawlFilterKeyword(keyword="설교"))
+    db.commit()
+    db.refresh(ch)
+
+    db.add(ReviewQueue(
+        youtube_video_id="fp_vid3",
+        youtube_url="https://youtube.com/watch?v=fp_vid3",
+        video_title="주일 설교 - 사랑이란",
+        channel_id=ch.id,
+        parsed_song_title="사랑이란",
+    ))
+    db.commit()
+
+    resp = client.post(
+        "/api/admin/review/filter-and-purge",
+        json={"keyword": "설교"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["keyword_added"] is False
+    assert resp.json()["rejected"] == 1
+
+
+def test_filter_and_purge_empty_keyword(client, admin_headers):
+    resp = client.post(
+        "/api/admin/review/filter-and-purge",
+        json={"keyword": "   "},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400

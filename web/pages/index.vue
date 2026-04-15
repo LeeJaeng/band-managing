@@ -16,6 +16,18 @@ const loadError = computed(() => {
 })
 
 async function load() { await refresh() }
+
+async function deleteConti(c: any, ev: Event) {
+  ev.preventDefault()
+  ev.stopPropagation()
+  if (!confirm(`"${c.service_name}" 콘티를 삭제하시겠습니까?`)) return
+  try {
+    await api(`/api/contis/${c.id}`, { method: 'DELETE' })
+    await load()
+  } catch (e: any) {
+    alert(e?.data?.detail || e?.message || '삭제 실패')
+  }
+}
 </script>
 
 <template>
@@ -49,6 +61,7 @@ async function load() { await refresh() }
           <span class="conti-author">{{ c.author }}</span>
           <span :class="['conti-status', c.status.toLowerCase()]">{{ c.status === 'CONFIRMED' ? '확정' : '작성중' }}</span>
         </div>
+        <button class="conti-delete" @click="deleteConti(c, $event)">삭제</button>
       </NuxtLink>
     </div>
   </div>
@@ -122,6 +135,18 @@ async function load() { await refresh() }
   gap: 12px;
   font-size: 13px;
   color: var(--text-dim);
+}
+
+.conti-delete {
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  &:hover { background: var(--red-soft); }
 }
 
 @media (max-width: 640px) {
