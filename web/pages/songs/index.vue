@@ -47,6 +47,17 @@ function toggleSelect(id: string) {
 }
 function clearSelection() { selected.value = []; bulkMode.value = null; mergeTarget.value = null }
 
+const allDisplaySelected = computed(() =>
+  displaySongs.value.length > 0 && displaySongs.value.every(s => selected.value.includes(s.id))
+)
+function toggleSelectAll() {
+  if (allDisplaySelected.value) {
+    selected.value = []
+  } else {
+    selected.value = displaySongs.value.map(s => s.id)
+  }
+}
+
 const selectedSongs = computed(() => songs.value.filter(s => isSelected(s.id)))
 
 // 병합 모드 (2개+ 선택 시)
@@ -397,6 +408,9 @@ onMounted(async () => {
       총 {{ total }}곡
       <span v-if="groupDuplicates"> · 중복 {{ displaySongs.length }}곡</span>
       <span v-if="selected.length" class="selected-count"> · {{ selected.length }}개 선택</span>
+      <button v-if="isAdmin && !loading && songs.length" class="select-all-btn" @click="toggleSelectAll">
+        {{ allDisplaySelected ? '선택 해제' : '전체 선택' }}
+      </button>
     </p>
 
     <div v-if="loading" class="loading">불러오는 중...</div>
@@ -737,8 +751,15 @@ onMounted(async () => {
   &:hover { color: var(--accent); }
 }
 
-.total { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+.total { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .selected-count { color: var(--accent); font-weight: 700; }
+.select-all-btn {
+  margin-left: auto;
+  font-size: 12px; padding: 2px 10px; border-radius: 12px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-dim); cursor: pointer;
+  &:hover { color: var(--accent); border-color: var(--accent); }
+}
 
 .loading, .empty { text-align: center; padding: 40px; color: var(--text-dim); }
 
